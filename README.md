@@ -74,8 +74,8 @@ A definition is different. No command stands behind "Quillon is the codename for
 
 A ledger follows ten rules. `ley` enforces the ones a program can enforce. Each of those has a fixture in [`fixtures`](fixtures): a small file that breaks the rule and says why.
 
-1. **show, do not state.** A row gives the command that shows a thing. It does not describe what the command showed. A description is true on the day it is written. A command is true each time it runs. `ley check` reports a row whose `shows` repeats what its command printed.
-2. **no stored output.** A row holds no file position, no line number and no matched text. Those are the first things to go out of date.
+1. **show, do not state.** A row gives a command that shows the thing, and says only what kind of thing the command shows. "The package manager this directory declares" stays true when the version changes. A sentence that names the version does not, and the row would go on holding. `ley check` reports a row whose `shows` repeats a value or a phrase that its command printed. It cannot find a paraphrase.
+2. **no stored output.** Nothing a command printed is kept in a row: no value, no file position, no line number, no matched text. Those are the first things to go out of date.
 3. **a command or a source.** Every sentence in a ledger is either what a command shows, or what a named source said on a date. Some facts have no command: what a codename means, why a choice was made. Those rows say who said so, and when.
 4. **no grades.** A ledger records who said a thing and when. It does not rank its sources or assign a level of trust. The reader can count the sources and weigh them. An agent is a source like any other, and is named as one.
 5. **no instructions.** A row states a fact and leaves the reader to decide whether to run anything. The author writes the parts of a row and `ley` writes the sentence, so a row cannot become "check this first".

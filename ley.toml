@@ -28,9 +28,9 @@ row = [
   { name = "example", run = "rg --files -g ley.toml examples", shows = "the ledger of each example" },
 
   # ---- the rules
-  { name = "show, do not state", is = "the rule that a row gives the command that shows a thing, and no description of what the command showed", said = [{ by = "maintainer", on = 2026-11-10 }] },
+  { name = "show, do not state", is = "the rule that a row gives a command that shows the thing, and says only what kind of thing the command shows", said = [{ by = "maintainer", on = 2026-11-10 }] },
   { name = "show, do not state", run = "ast-grep outline --type function --match '^restated$' --view signatures src", shows = "the function that finds text in a row that its own command printed" },
-  { name = "no stored output", is = "the rule that a row never holds what its command printed: no file position, no line number, no matched text", said = [{ by = "maintainer", on = 2026-11-10 }] },
+  { name = "no stored output", is = "the rule that nothing a command printed is kept in a row: no value, no file position, no line number, no matched text", said = [{ by = "maintainer", on = 2026-11-10 }] },
   { name = "no stored output", run = "rg -l -F '# breaks: stored-output' fixtures/invalid", shows = "the broken ledgers that show what this rule refuses", count = 2 },
   { name = "a command or a source", is = "the rule that every sentence in a ledger is either what a command shows or what a named source said on a date", said = [{ by = "Claude", on = 2026-11-10 }] },
   { name = "a command or a source", run = "rg -l -F '# breaks: source' fixtures/invalid", shows = "the broken ledgers that show what this rule refuses", count = 4 },

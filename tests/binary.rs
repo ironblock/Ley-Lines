@@ -200,7 +200,7 @@ fn the_program_describes_the_file_and_the_rules_itself() {
     }
     let rules = stdout(&ley(dir, &["rules"]));
     assert!(
-        rules.starts_with("show, do not state\n    A row gives the command"),
+        rules.starts_with("show, do not state\n    A row gives a command that shows the thing"),
         "{rules}"
     );
     assert!(rules.contains("\nno stored output\n"));
