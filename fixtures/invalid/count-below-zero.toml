@@ -1,0 +1,5 @@
+# breaks: count
+# A command cannot show fewer than 0 results.
+row = [
+  { name = "stage", run = "rg -n -F stage pipeline.toml", shows = "the stages", count = -1 },
+]

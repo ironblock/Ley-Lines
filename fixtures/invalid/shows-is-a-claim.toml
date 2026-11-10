@@ -1,0 +1,5 @@
+# breaks: shows
+# `shows` states a conclusion. It must name what the command looks for. `count = 0` already says the command finds none.
+row = [
+  { name = "legacy", run = "rg -l -i legacy services", shows = "no file under services mentions the word legacy", count = 0 },
+]

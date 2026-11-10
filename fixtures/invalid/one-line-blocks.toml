@@ -1,0 +1,6 @@
+# breaks: one-line
+# TOML allows a row to be written as a block. Then a search for a name returns one line of the row, not the row.
+[[row]]
+name = "Quillon"
+is = "the codename for the nightly billing run"
+said = [{ by = "maintainer", on = 2026-11-10 }]

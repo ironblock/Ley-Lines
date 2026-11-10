@@ -1,0 +1,5 @@
+# breaks: since
+# A commit with no date. `ley since` writes both.
+row = [
+  { name = "Stage", run = "rg -n Stage services", shows = "the lines that mention Stage", sha = "0123456789ab" },
+]

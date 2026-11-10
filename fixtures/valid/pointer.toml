@@ -1,0 +1,4 @@
+# A command, and what it shows. With no `count`, the command shows 1 result.
+row = [
+  { name = "Stage", run = "rg -n 'interface Stage' services", shows = "the line that declares interface Stage" },
+]

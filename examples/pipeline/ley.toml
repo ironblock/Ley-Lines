@@ -1,0 +1,11 @@
+# The ledger for the example in this directory. Every name in it is invented.
+row = [
+  { name = "Quillon", is = "the codename for the nightly billing run", said = [{ by = "maintainer", on = 2026-11-10 }] },
+  { name = "Quillon", run = "rg -n -F Quillon docs/glossary.md", shows = "the glossary line that defines Quillon" },
+  { name = "Brimstone", is = "the batch platform, where long jobs run", said = [{ by = "maintainer", on = 2026-11-10 }, { by = "the platform team", on = 2026-11-10 }] },
+  { name = "stage", run = "rg -n -F '[stage.' pipeline.toml", shows = "the name of each stage of the billing run, in the order they run", count = 3 },
+  { name = "stage", run = "ast-grep outline --type interface --match '^Stage$' --view expanded services", shows = "the file, line and fields of interface Stage" },
+  { name = "platform", run = "rg -n '^platform' pipeline.toml", shows = "the platform each stage runs on", count = 3 },
+  { name = "QUILLON-409", run = "rg -n -F QUILLON-409 services", shows = "the line that raises error QUILLON-409" },
+  { name = "package manager", run = "rg -n -F packageManager shell/package.json extensions/package.json", shows = "the package manager each of the two repositories declares", count = 2 },
+]

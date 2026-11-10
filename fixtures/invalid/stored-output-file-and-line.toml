@@ -1,0 +1,5 @@
+# breaks: stored-output
+# The row records where the match was. That goes out of date the moment a line is added above it. The command finds it every time.
+row = [
+  { name = "Stage", run = "rg -n 'interface Stage' services", shows = "the declaration at services/quillon/stage.ts:3" },
+]

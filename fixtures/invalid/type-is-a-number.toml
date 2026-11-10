@@ -1,0 +1,5 @@
+# breaks: type
+# `is` is text.
+row = [
+  { name = "retries", is = 3, said = [{ by = "maintainer", on = 2026-11-10 }] },
+]

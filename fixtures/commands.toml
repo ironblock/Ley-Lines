@@ -1,0 +1,147 @@
+# Commands, and what `ley check` makes of each.
+#
+# `argv` is the program and arguments `ley` starts, with no shell.
+# `refused` is part of the reason a command is not run. `why` says it in plain words.
+# A refused command is still a valid row: readers see it, and `ley check` reports
+# it as "not checked".
+
+# ---- commands that run
+
+[[command]]
+run = "rg -n -F Quillon docs/glossary.md"
+argv = ["rg", "-n", "-F", "Quillon", "docs/glossary.md"]
+
+[[command]]
+run = "rg -n 'interface Stage' services"
+argv = ["rg", "-n", "interface Stage", "services"]
+
+[[command]]
+run = "rg --files -g '*.toml' config"
+argv = ["rg", "--files", "-g", "*.toml", "config"]
+
+[[command]]
+run = "rg -e alpha -e beta notes docs"
+argv = ["rg", "-e", "alpha", "-e", "beta", "notes", "docs"]
+
+[[command]]
+run = "rg -l --type=ts -- '-retries' services"
+argv = ["rg", "-l", "--type=ts", "--", "-retries", "services"]
+
+[[command]]
+run = "ast-grep run -l ts -p 'interface $NAME { $$$ }' services"
+argv = ["ast-grep", "run", "-l", "ts", "-p", "interface $NAME { $$$ }", "services", "--json=stream"]
+
+[[command]]
+run = "ast-grep run --kind interface_declaration services"
+argv = ["ast-grep", "run", "--kind", "interface_declaration", "services", "--json=stream"]
+
+[[command]]
+run = "ast-grep scan --inline-rules '{id: r, language: ts, rule: {kind: interface_declaration}}' services"
+argv = ["ast-grep", "scan", "--inline-rules", "{id: r, language: ts, rule: {kind: interface_declaration}}", "services", "--json=stream"]
+
+[[command]]
+run = "ast-grep outline --type interface --match '^Stage$' --view expanded services"
+argv = ["ast-grep", "outline", "--type", "interface", "--match", "^Stage$", "--view", "expanded", "services", "--json=stream"]
+
+# ---- no shape for the program
+
+[[command]]
+run = "cargo test"
+refused = "no shape for `cargo`"
+why = "Only the programs in src/shapes.toml are run."
+
+[[command]]
+run = "./find-stage.sh"
+refused = "no shape for `./find-stage.sh`"
+why = "A script in the repository can do anything. It is shown, not run."
+
+[[command]]
+run = "ast-grep new rule"
+refused = "no shape for `ast-grep new`"
+why = "This subcommand writes files."
+
+# ---- a flag that is not in the shape
+
+[[command]]
+run = "rg --pre cat Stage services"
+refused = "`--pre` is not in the shape"
+why = "`--pre` makes rg run another program on every file."
+
+[[command]]
+run = "rg -c Stage services"
+refused = "`-c` is not in the shape"
+why = "With `-c`, one line is one file, not one match. A count would mean something else."
+
+[[command]]
+run = "rg -A 2 Stage services"
+refused = "`-A` is not in the shape"
+why = "Context lines would be counted as results."
+
+[[command]]
+run = "ast-grep run -p 'var $A = $B' --rewrite 'let $A = $B' -U src"
+refused = "`--rewrite` is not in the shape"
+why = "With `-U`, this rewrites files."
+
+[[command]]
+run = "ast-grep run -p 'foo($A)' --json src"
+refused = "`--json` is not in the shape"
+why = "`ley` adds the flag it needs to count results. The row holds the command as a reader would type it."
+
+[[command]]
+run = "ast-grep outline --custom-languages allow src"
+refused = "`--custom-languages` is not in the shape"
+why = "This lets a repository load a native library, which can run any code."
+
+# ---- a command that would not mean the same thing to every reader
+
+[[command]]
+run = "rg Stage"
+refused = "needs a path"
+why = "With no path, rg searches standard input when that is a pipe, and the directory when it is not. Two readers would see two different things."
+
+[[command]]
+run = "rg -n Stage /srv/billing/services"
+refused = "is not relative"
+why = "The path exists on one machine only."
+
+[[command]]
+run = "rg -n Stage ../other-repository"
+refused = "leaves the ledger's directory"
+why = "A ledger is about the place it sits in."
+
+[[command]]
+run = "ast-grep scan services"
+refused = "needs one of"
+why = "With no rule named, scan uses whatever rule files the project has. The row would not say what it searches for."
+
+# ---- something a shell would interpret
+
+[[command]]
+run = "rg -c Stage services | sort"
+refused = "`|` needs a shell"
+why = "`ley` starts no shell, so there is nothing to connect the two programs."
+
+[[command]]
+run = "rg -n $NAME services"
+refused = "a shell interprets `$`"
+why = "The row would depend on a variable in the reader's shell."
+
+[[command]]
+run = "rg -n \"interface $NAME\" services"
+refused = "a shell expands `$` inside double quotes"
+why = "Single quotes keep the text as written."
+
+[[command]]
+run = "rg -n Stage services/*.ts"
+refused = "a shell interprets `*`"
+why = "The shell would expand this before rg saw it. Use `-g '*.ts' services`."
+
+[[command]]
+run = "rg -n Stage services > found.txt"
+refused = "`>` needs a shell"
+why = "A row never writes a file."
+
+[[command]]
+run = "rg -n 'Stage services"
+refused = "a single quote is never closed"
+why = "The command is not complete."

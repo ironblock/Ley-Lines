@@ -1,0 +1,5 @@
+# breaks: since
+# `since` is a date, written without quotes.
+row = [
+  { name = "Stage", run = "rg -n Stage services", shows = "the lines that mention Stage", since = "2026-11-10" },
+]

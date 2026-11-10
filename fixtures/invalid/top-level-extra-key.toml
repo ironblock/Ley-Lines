@@ -1,0 +1,4 @@
+# breaks: top-level
+# A ledger has one top-level key, `row`. Anything else is probably a mistake.
+title = "billing"
+row = []

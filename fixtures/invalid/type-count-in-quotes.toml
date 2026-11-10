@@ -1,0 +1,5 @@
+# breaks: type
+# `count` is a number, not text.
+row = [
+  { name = "stage", run = "rg -n -F stage pipeline.toml", shows = "the stages", count = "3" },
+]
