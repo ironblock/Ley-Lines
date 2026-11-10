@@ -38,6 +38,8 @@ pub const RULES: [&str; 13] = [
 #[derive(Debug, Clone)]
 pub struct Ledger {
     pub path: PathBuf,
+    /// The text the rows were read from.
+    pub text: String,
     pub rows: Vec<Row>,
 }
 
@@ -162,6 +164,7 @@ pub fn load(path: &Path) -> Result<Ledger, LoadError> {
     let rows = parse(&text).map_err(LoadError::Problems)?;
     Ok(Ledger {
         path: path.to_path_buf(),
+        text,
         rows,
     })
 }
@@ -543,8 +546,10 @@ fn text(table: &Table, key: &str, line: usize, problems: &mut Vec<Problem>) -> O
         Some("is empty")
     } else if value.trim() != value {
         Some("starts or ends with a space")
-    } else if value.contains(['\n', '\r', '\t']) {
-        Some("is more than one line")
+    } else if value.chars().any(char::is_control) {
+        // A new line would let a row forge a second row when it is printed. Other
+        // control characters can rewrite what a terminal shows.
+        Some("is more than one line, or holds a control character")
     } else {
         None
     };
@@ -566,7 +571,17 @@ fn source(value: &Value) -> Result<Source, String> {
         return Err(format!("`{key}` is not a key a source has: {FORM}"));
     }
     let by = match table.get("by") {
-        Some(Value::String(by)) if !by.trim().is_empty() && by.trim() == by => by.clone(),
+        Some(Value::String(by))
+            if !by.trim().is_empty() && by.trim() == by && !by.chars().any(char::is_control) =>
+        {
+            by.clone()
+        }
+        Some(Value::String(_)) => {
+            return Err(
+                "`by` is a name on one line, with no space at either end and no control character"
+                    .into(),
+            );
+        }
         _ => return Err(FORM.into()),
     };
     let on = match table.get("on") {
@@ -585,11 +600,14 @@ fn date(when: &Datetime) -> Option<Date> {
 }
 
 /// File endings that mark a word as a file, so that `stage.ts:12` is a position
-/// and `billing.internal:8443` is not.
-const FILE_ENDINGS: [&str; 36] = [
-    "c", "cc", "cfg", "conf", "cpp", "cs", "css", "go", "h", "hpp", "html", "ini", "java", "js",
-    "json", "jsx", "kt", "lock", "md", "php", "py", "rb", "rs", "scala", "sh", "sql", "swift",
-    "toml", "ts", "tsx", "txt", "vue", "xml", "yaml", "yml", "zig",
+/// and `billing.internal:8443` or the image tag `billing/api:2` is not. The list
+/// cannot be complete. A missed ending lets a position through; it never refuses
+/// honest text.
+const FILE_ENDINGS: [&str; 46] = [
+    "c", "cc", "cfg", "cjs", "conf", "cpp", "cs", "css", "cts", "dart", "go", "h", "hpp", "html",
+    "ini", "java", "js", "json", "jsx", "kt", "lock", "lua", "md", "mjs", "mts", "php", "proto",
+    "py", "rb", "rs", "scala", "sh", "sql", "svelte", "swift", "tf", "toml", "ts", "tsx", "txt",
+    "vue", "xml", "yaml", "yml", "zig", "zsh",
 ];
 
 /// Find text that records where a match was: `src/a.rs:12`, or `on line 12`.
@@ -617,8 +635,7 @@ fn stored_output(text: &str) -> Option<String> {
             let ending = file
                 .rsplit_once('.')
                 .map(|(_, end)| end.to_ascii_lowercase());
-            let is_a_file = file.contains('/')
-                || ending.is_some_and(|end| FILE_ENDINGS.contains(&end.as_str()));
+            let is_a_file = ending.is_some_and(|end| FILE_ENDINGS.contains(&end.as_str()));
             if is_a_file && starts_with_digit(rest) {
                 return Some((*word).to_string());
             }
@@ -652,45 +669,80 @@ fn line_starting_with(text: &str, key: &str) -> Option<usize> {
 /// Record `since` and `sha` on rows, or remove them, changing nothing else in the file.
 ///
 /// `updates` holds the position of each row in the ledger, and what to record.
-/// `None` removes both keys.
+/// `None` removes both keys. Only the bytes of those two keys change: the spacing of
+/// the row, the other rows, the comments and a byte-order mark all stay as they were.
 pub fn record_since(text: &str, updates: &[(usize, Option<Since>)]) -> Result<String, String> {
-    let mut doc: toml_edit::DocumentMut = text
-        .parse()
+    let document = toml_edit::Document::parse(text)
         .map_err(|e| format!("the ledger is not valid TOML: {e}"))?;
-    let rows = doc
-        .get_mut("row")
-        .and_then(|item| item.as_array_mut())
+    let rows = document
+        .as_table()
+        .get("row")
+        .and_then(|item| item.as_array())
         .ok_or("the ledger has no `row` list")?;
+
+    // Each edit replaces one span of the text.
+    let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     for (index, since) in updates {
         let row = rows
-            .get_mut(*index)
-            .and_then(|value| value.as_inline_table_mut())
+            .get(*index)
+            .and_then(|value| value.as_inline_table())
             .ok_or_else(|| format!("row {} is not a table on one line", index + 1))?;
+        // The keys of the row in the order they are written, with where each key
+        // and each value sits in the text.
+        let mut entries = Vec::new();
+        for (name, _) in row.iter() {
+            let spans = row
+                .get_key_value(name)
+                .and_then(|(key, value)| Some((key.span()?, value.span()?)));
+            let (key, value) = spans.ok_or("the parser did not say where a key sits")?;
+            entries.push((name, key, value));
+        }
+        let place = |name: &str| entries.iter().position(|(key, _, _)| *key == name);
+        // A key goes together with the comma before it; the first key, with the comma after.
+        let without = |i: usize| match i {
+            0 if entries.len() > 1 => entries[0].1.start..entries[1].1.start,
+            0 => entries[0].1.start..entries[0].2.end,
+            _ => entries[i - 1].2.end..entries[i].2.end,
+        };
         match since {
             Some(since) => {
-                let date: toml_edit::Datetime = since
-                    .date
-                    .to_string()
-                    .parse()
-                    .map_err(|e| format!("{}: {e}", since.date))?;
-                row.insert("since", toml_edit::Value::from(date));
-                match &since.sha {
-                    Some(sha) => {
-                        row.insert("sha", toml_edit::Value::from(sha.as_str()));
+                let mut added = Vec::new();
+                let date = since.date.to_string();
+                match place("since") {
+                    Some(i) => edits.push((entries[i].2.clone(), date)),
+                    None => added.push(format!("since = {date}")),
+                }
+                match (&since.sha, place("sha")) {
+                    (Some(sha), Some(i)) => {
+                        edits.push((entries[i].2.clone(), format!("\"{sha}\"")))
                     }
-                    None => {
-                        row.remove("sha");
-                    }
+                    (Some(sha), None) => added.push(format!("sha = \"{sha}\"")),
+                    (None, Some(i)) => edits.push((without(i), String::new())),
+                    (None, None) => {}
+                }
+                if !added.is_empty() {
+                    let end = entries.iter().map(|(_, _, value)| value.end).max();
+                    let end = end.ok_or("a row has no keys")?;
+                    edits.push((end..end, format!(", {}", added.join(", "))));
                 }
             }
             None => {
-                row.remove("since");
-                row.remove("sha");
+                for name in ["since", "sha"] {
+                    if let Some(i) = place(name) {
+                        edits.push((without(i), String::new()));
+                    }
+                }
             }
         }
-        row.fmt();
     }
-    Ok(doc.to_string())
+
+    // Work from the end of the text back, so earlier spans stay where they were.
+    edits.sort_by_key(|(span, _)| std::cmp::Reverse((span.start, span.end)));
+    let mut out = text.to_string();
+    for (span, with) in edits {
+        out.replace_range(span, &with);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -712,6 +764,7 @@ mod tests {
             ("the run at 10:30 each night", None),
             ("the page at https://example.org:8080/x", None),
             ("the proxy that listens on billing.internal:8443", None),
+            ("the image published as billing/api:2", None),
             ("the host 10.0.0.5:443", None),
             ("the ratio v1.2:3", None),
             ("the line each stage is declared on", None),
@@ -748,5 +801,31 @@ mod tests {
         assert!(parse(&out).is_ok());
         // Removing it gives the first file back.
         assert_eq!(record_since(&out, &[(0, None)]).unwrap(), text);
+    }
+
+    #[test]
+    fn recording_since_keeps_the_spacing_of_the_row_and_a_byte_order_mark() {
+        let text = "\u{feff}row = [\n  {name=\"a\",   run = \"rg x src\",shows = \"x\"},\n]\n";
+        let since = Since {
+            date: "2026-11-09".parse::<Datetime>().unwrap().date.unwrap(),
+            sha: Some("0123456789ab".into()),
+        };
+        let out = record_since(text, &[(0, Some(since))]).unwrap();
+        assert_eq!(
+            out,
+            "\u{feff}row = [\n  {name=\"a\",   run = \"rg x src\",shows = \"x\", since = 2026-11-09, sha = \"0123456789ab\"},\n]\n"
+        );
+        // A later date and another commit replace only those two values.
+        let later = Since {
+            date: "2026-12-01".parse::<Datetime>().unwrap().date.unwrap(),
+            sha: Some("ba9876543210".into()),
+        };
+        let moved = record_since(&out, &[(0, Some(later))]).unwrap();
+        assert_eq!(
+            moved,
+            out.replace("2026-11-09", "2026-12-01")
+                .replace("0123456789ab", "ba9876543210")
+        );
+        assert_eq!(record_since(&moved, &[(0, None)]).unwrap(), text);
     }
 }

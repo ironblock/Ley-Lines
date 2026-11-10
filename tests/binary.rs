@@ -292,7 +292,12 @@ impl History {
     }
 
     fn git(&self, args: &[&str], date: &str) -> String {
-        let output = Command::new("git")
+        // Git here is about this test's own directory, whatever the environment says.
+        let mut command = Command::new("git");
+        for name in ley_lines::since::GIT_PLACE {
+            command.env_remove(name);
+        }
+        let output = command
             .args([
                 "-c",
                 "user.name=ley",
@@ -320,10 +325,12 @@ impl History {
     fn commit(&self, file: &str, text: &str, day: &str) -> String {
         fs::write(self.dir.join(file), text).unwrap();
         self.git(&["add", "--all"], "");
-        self.git(
-            &["commit", "--quiet", "--message", day],
-            &format!("{day}T12:00:00+00:00"),
-        );
+        // `day` is a day, or a day and a time.
+        let when = match day.contains('T') {
+            true => day.to_string(),
+            false => format!("{day}T12:00:00+00:00"),
+        };
+        self.git(&["commit", "--quiet", "--message", day], &when);
         self.git(&["rev-parse", "HEAD"], "")
     }
 }
@@ -645,6 +652,126 @@ fn since_says_so_when_a_program_could_not_run() {
     assert_eq!(
         fs::read_to_string(history.dir.join("ley.toml")).unwrap(),
         ledger
+    );
+}
+
+// The next tests come from a second review.
+
+#[test]
+fn since_run_from_a_git_hook_leaves_the_users_checkout_alone() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("src/words.txt", "alpha\n", "2026-01-01");
+    history.commit("src/words.txt", "alpha\nmore\n", "2026-02-01");
+    history.commit(
+        "ley.toml",
+        &format!("row = [\n  {ALPHA_ROW}\n]\n"),
+        "2026-03-01",
+    );
+    let head = history.git(&["rev-parse", "HEAD"], "");
+
+    // Git sets these when it runs a hook. They name the user's own repository.
+    let output = Command::new(LEY)
+        .args(["since", "--dry-run"])
+        .current_dir(&history.dir)
+        .env("GIT_DIR", history.dir.join(".git"))
+        .env("GIT_INDEX_FILE", ".git/index")
+        .env("GIT_PREFIX", "")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout(&output).contains("true since at least 2026-01-01"),
+        "{}",
+        stdout(&output)
+    );
+
+    assert_eq!(
+        history.git(&["symbolic-ref", "--short", "HEAD"], ""),
+        "main"
+    );
+    assert_eq!(history.git(&["rev-parse", "HEAD"], ""), head);
+    assert_eq!(history.git(&["status", "--porcelain"], ""), "");
+}
+
+#[test]
+fn since_sees_a_break_on_the_very_day_it_has_recorded() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("src/words.txt", "other\n", "2026-01-09");
+    let recorded = history.commit("src/words.txt", "alpha\n", "2026-01-10T08:00:00+00:00");
+    let broke = history.commit("src/words.txt", "other\n", "2026-01-10T16:00:00+00:00");
+    fs::write(history.dir.join("src/words.txt"), "alpha\n").unwrap();
+    let row = ALPHA_ROW.replace(
+        " },",
+        &format!(", since = 2026-01-10, sha = \"{}\" }},", &recorded[..12]),
+    );
+    let again = history.commit("ley.toml", &format!("row = [\n  {row}\n]\n"), "2026-01-12");
+
+    let printed = stdout(&ley(&history.dir, &["since"]));
+    assert_eq!(
+        printed,
+        format!(
+            "ley.toml:2: \"alpha\": true since at least 2026-01-12 (commit {}, held at 1 commit): moved later, because the row did not hold at commit {}\nRecorded 1 row in ley.toml.\n",
+            &again[..12],
+            &broke[..12]
+        )
+    );
+}
+
+#[test]
+fn a_personal_list_of_ignored_files_changes_nothing() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("src/words.txt", "alpha\n", "2026-01-01");
+    one_row(
+        &history.dir,
+        r#"{ name = "alpha", run = "rg -l -F alpha src", shows = "the files with alpha" },"#,
+    );
+    // A reader who ignores every .txt file, on their own machine only.
+    let home = history.dir.with_file_name("home");
+    fs::create_dir_all(home.join("config/git")).unwrap();
+    fs::write(home.join("config/git/ignore"), "*.txt\n").unwrap();
+    let personal = |command: &mut Command| {
+        command
+            .current_dir(&history.dir)
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", home.join("config"));
+    };
+    // With that list, the row's command shows that reader nothing...
+    let mut alone = Command::new("rg");
+    alone.args(["-l", "-F", "alpha", "src"]);
+    personal(&mut alone);
+    assert_eq!(String::from_utf8_lossy(&alone.output().unwrap().stdout), "");
+    // ...and `ley check` still counts what the repository holds.
+    let mut check = Command::new(LEY);
+    check.arg("check");
+    personal(&mut check);
+    assert_eq!(stdout(&check.output().unwrap()), "1 row: 1 holds.\n");
+}
+
+#[test]
+fn a_source_cannot_forge_a_second_row_when_it_is_printed() {
+    let dir = repository().join("fixtures/invalid");
+    let output = ley(
+        &dir,
+        &["--ledger", "source-on-two-lines.toml", "show", "Quillon"],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stdout(&output).contains("`by` is a name on one line"),
+        "{}",
+        stdout(&output)
     );
 }
 

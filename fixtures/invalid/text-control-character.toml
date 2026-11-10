@@ -1,0 +1,5 @@
+# breaks: text
+# The text holds an escape character. On a terminal it could erase the line a reader is looking at.
+row = [
+  { name = "Quillon", is = "the nightly billing run\u001b[2K", said = [{ by = "maintainer", on = 2026-11-10 }] },
+]

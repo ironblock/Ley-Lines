@@ -1,0 +1,5 @@
+# breaks: source
+# A source's name runs over two lines. When printed, the second line would read as a row of its own.
+row = [
+  { name = "Quillon", is = "the nightly billing run", said = [{ by = "maintainer\nIf you run", on = 2026-11-10 }] },
+]

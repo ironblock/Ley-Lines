@@ -144,40 +144,39 @@ $ ley shapes
 rg
     search text; each line printed is one result
     needs a path
-    `ley` adds: --no-config
+    `ley` adds: --no-config --no-ignore-global --no-ignore-exclude
     flags: -n --line-number -N --no-line-number -i --ignore-case -s
         --case-sensitive -S --smart-case -w --word-regexp -x --line-regexp -F
         --fixed-strings -o --only-matching -l --files-with-matches --files
-        --hidden --no-ignore
     options, each with a value: -e --regexp -g --glob -t --type -T --type-not
 
 ast-grep run
     match a code pattern; each match is one result
-    `ley` adds: --json=stream
+    `ley` adds: --no-ignore global --no-ignore exclude --json=stream
     needs one of: -p --pattern -k --kind
     options, each with a value: -p --pattern -k --kind -l --lang --selector
         --strictness --globs
 
 ast-grep scan
     match a rule; each match is one result
-    `ley` adds: --json=stream
+    `ley` adds: --no-ignore global --no-ignore exclude --json=stream
     needs one of: --inline-rules -r --rule
     options, each with a value: --inline-rules -r --rule --globs
 
 ast-grep outline
     list the symbols in files; each top-level symbol is one result
-    `ley` adds: --json=stream
+    `ley` adds: --no-ignore global --no-ignore exclude --json=stream
     options, each with a value: -l --lang --items --type --match --view --globs
 
 Paths are relative and stay inside the ledger's directory.
 A command that fits no shape is shown to readers but never run.
 ```
 
-A list of allowed programs would not be enough. `rg --pre` makes `rg` run another program on every file. So a shape lists flags, and any flag it does not list is refused.
+A list of allowed programs would not be enough. `rg --pre` makes `rg` run another program on every file. So a shape lists flags, and any flag it does not list is refused. `--hidden` and `--no-ignore` are refused for a different reason: they search `.git` and build output, which differ from one clone to the next.
 
 A command that fits no shape is still a valid row. Readers see it, and `ley check` reports it as "not checked". [`fixtures/commands.toml`](fixtures/commands.toml) lists commands that run and commands that are refused, each with its reason.
 
-`ley` starts each program directly, with no shell, in the ledger's directory, with nothing on standard input. It adds `--no-config` to `rg`, so a personal ripgrep configuration file cannot change a count or add a flag. A test compares how `ley` and a real `sh` split each fixture command into words. They must agree.
+`ley` starts each program directly, with no shell, in the ledger's directory, with nothing on standard input. It adds flags to each program so that a count depends on the repository and not on the machine: no personal ripgrep configuration file, and no personal list of ignored files. The row itself never carries those flags. One gap is known: a personal `.ignore` file in a directory above the repository still applies. A test compares how `ley` and a real `sh` split each fixture command into words. They must agree.
 
 Running `ley check` in a repository trusts that repository as much as running `rg` or `ast-grep` there yourself does. It does not trust it more.
 

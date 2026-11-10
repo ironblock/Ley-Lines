@@ -1,0 +1,4 @@
+# An image tag has a slash, a colon and a number, and is not a file position.
+row = [
+  { name = "billing image", is = "the image published as billing/api:2 by the platform team", said = [{ by = "maintainer", on = 2026-11-10 }] },
+]

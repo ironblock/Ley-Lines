@@ -1,7 +1,9 @@
 # Commands, and what `ley check` makes of each.
 #
 # `argv` is the program and arguments `ley` starts, with no shell. It is the row's
-# command plus the flags `ley` adds: `--no-config` for rg, `--json=stream` for ast-grep.
+# command plus the flags `ley` adds: for rg, the flags that switch off a personal
+# configuration file and personal ignore files; for ast-grep, `--json=stream` to
+# count matches, and the same for ignore files.
 # `refused` is part of the reason a command is not run. `why` says it in plain words.
 # A refused command is still a valid row: readers see it, and `ley check` reports
 # it as "not checked".
@@ -10,39 +12,39 @@
 
 [[command]]
 run = "rg -n -F Quillon docs/glossary.md"
-argv = ["rg", "--no-config", "-n", "-F", "Quillon", "docs/glossary.md"]
+argv = ["rg", "--no-config", "--no-ignore-global", "--no-ignore-exclude", "-n", "-F", "Quillon", "docs/glossary.md"]
 
 [[command]]
 run = "rg -n 'interface Stage' services"
-argv = ["rg", "--no-config", "-n", "interface Stage", "services"]
+argv = ["rg", "--no-config", "--no-ignore-global", "--no-ignore-exclude", "-n", "interface Stage", "services"]
 
 [[command]]
 run = "rg --files -g '*.toml' config"
-argv = ["rg", "--no-config", "--files", "-g", "*.toml", "config"]
+argv = ["rg", "--no-config", "--no-ignore-global", "--no-ignore-exclude", "--files", "-g", "*.toml", "config"]
 
 [[command]]
 run = "rg -e alpha -e beta notes docs"
-argv = ["rg", "--no-config", "-e", "alpha", "-e", "beta", "notes", "docs"]
+argv = ["rg", "--no-config", "--no-ignore-global", "--no-ignore-exclude", "-e", "alpha", "-e", "beta", "notes", "docs"]
 
 [[command]]
 run = "rg -l --type=ts -- '-retries' services"
-argv = ["rg", "--no-config", "-l", "--type=ts", "--", "-retries", "services"]
+argv = ["rg", "--no-config", "--no-ignore-global", "--no-ignore-exclude", "-l", "--type=ts", "--", "-retries", "services"]
 
 [[command]]
 run = "ast-grep run -l ts -p 'interface $NAME { $$$ }' services"
-argv = ["ast-grep", "run", "--json=stream", "-l", "ts", "-p", "interface $NAME { $$$ }", "services"]
+argv = ["ast-grep", "run", "--json=stream", "--no-ignore", "global", "--no-ignore", "exclude", "-l", "ts", "-p", "interface $NAME { $$$ }", "services"]
 
 [[command]]
 run = "ast-grep run --kind interface_declaration services"
-argv = ["ast-grep", "run", "--json=stream", "--kind", "interface_declaration", "services"]
+argv = ["ast-grep", "run", "--json=stream", "--no-ignore", "global", "--no-ignore", "exclude", "--kind", "interface_declaration", "services"]
 
 [[command]]
 run = "ast-grep scan --inline-rules '{id: r, language: ts, rule: {kind: interface_declaration}}' services"
-argv = ["ast-grep", "scan", "--json=stream", "--inline-rules", "{id: r, language: ts, rule: {kind: interface_declaration}}", "services"]
+argv = ["ast-grep", "scan", "--json=stream", "--no-ignore", "global", "--no-ignore", "exclude", "--inline-rules", "{id: r, language: ts, rule: {kind: interface_declaration}}", "services"]
 
 [[command]]
 run = "ast-grep outline --type interface --match '^Stage$' --view expanded services"
-argv = ["ast-grep", "outline", "--json=stream", "--type", "interface", "--match", "^Stage$", "--view", "expanded", "services"]
+argv = ["ast-grep", "outline", "--json=stream", "--no-ignore", "global", "--no-ignore", "exclude", "--type", "interface", "--match", "^Stage$", "--view", "expanded", "services"]
 
 # ---- no shape for the program
 
@@ -67,6 +69,16 @@ why = "This subcommand writes files."
 run = "rg --pre cat Stage services"
 refused = "`--pre` is not in the shape"
 why = "`--pre` makes rg run another program on every file."
+
+[[command]]
+run = "rg -l --hidden -F Quillon ."
+refused = "`--hidden` is not in the shape"
+why = "It makes rg search `.git`, whose contents differ from one clone to the next. A row can name a hidden path instead."
+
+[[command]]
+run = "rg -l --no-ignore -F Quillon ."
+refused = "`--no-ignore` is not in the shape"
+why = "It makes rg search build output and whatever else one machine happens to hold."
 
 [[command]]
 run = "rg -c Stage services"

@@ -31,6 +31,9 @@ pub enum Found {
         /// The newest commit at which the row did not hold. `None` when the row
         /// still held at the oldest commit in this history.
         broke: Option<Commit>,
+        /// Whether that commit comes after the commit the row has recorded. `None`
+        /// when the row records no commit, or records one this history does not have.
+        after_recorded: Option<bool>,
     },
     /// The row's command ran at the current commit and did not show what the row says.
     NotNow(String),
@@ -100,8 +103,13 @@ impl Change {
 
 /// Decide what becomes of a row's recorded date.
 pub fn decide(recorded: Option<&Since>, found: &Found, shallow: bool) -> Change {
-    let (since, broke) = match found {
-        Found::Since { since, broke, .. } => (since, broke),
+    let (since, broke, after_recorded) = match found {
+        Found::Since {
+            since,
+            broke,
+            after_recorded,
+            ..
+        } => (since, broke, after_recorded),
         Found::NotNow(_) if recorded.is_some() => return Change::Removed,
         Found::NotNow(_) | Found::CouldNotRun(_) | Found::NotChecked(_) => return Change::Nothing,
     };
@@ -115,8 +123,16 @@ pub fn decide(recorded: Option<&Since>, found: &Found, shallow: bool) -> Change 
         return Change::Earlier(since.clone());
     }
     // The walk starts later than the recorded date, or on the same day at another commit.
+    // Did the row break after the point it has recorded? The history says so when the
+    // recorded commit is in it. When it is not, as after a squash, only the dates are
+    // left to compare, and a break on the recorded day itself counts as after.
+    let broke_after = match (broke, after_recorded) {
+        (Some(_), Some(after)) => *after,
+        (Some(broke), None) => broke.date >= recorded.date,
+        (None, _) => false,
+    };
     match broke {
-        Some(broke) if broke.date > recorded.date => Change::Later {
+        Some(broke) if broke_after => Change::Later {
             since: since.clone(),
             broke: broke.clone(),
         },
@@ -222,6 +238,7 @@ pub fn since(ledger: &Ledger, limit: Duration) -> Result<Walk, String> {
                     since: held_since(step)?,
                     commits: step + 1,
                     broke: None,
+                    after_recorded: None,
                 },
             });
         }
@@ -234,6 +251,10 @@ pub fn since(ledger: &Ledger, limit: Duration) -> Result<Walk, String> {
                         sha: short(commits[broke_at]),
                         date: date_of(commits[broke_at])?,
                     }),
+                    after_recorded: ledger.rows[index]
+                        .pointer()
+                        .and_then(|pointer| pointer.since.as_ref()?.sha.as_deref())
+                        .and_then(|recorded| is_ancestor(&root, recorded, commits[broke_at])),
                 },
                 (None, Status::Differs { got, .. }) => {
                     Found::NotNow(format!("the command showed {got}"))
@@ -289,18 +310,45 @@ impl Tree {
 
 impl Drop for Tree {
     fn drop(&mut self) {
+        // This removes the one working tree `ley` added. It does not prune: that
+        // would also drop the user's own working trees whose directories are away.
         let at = self.path.to_string_lossy().into_owned();
         let _ = git(&self.root, &["worktree", "remove", "--force", &at]);
-        let _ = git(&self.root, &["worktree", "prune"]);
     }
 }
 
+/// The variables git sets to say which repository a command is about. Inside a git
+/// hook they name the user's own repository and index. `ley` clears them, so that
+/// every git command it runs is about the directory it names and nothing else.
+pub const GIT_PLACE: [&str; 15] = [
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
+
+fn git_command(dir: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(dir).args(args).stdin(Stdio::null());
+    for name in GIT_PLACE {
+        command.env_remove(name);
+    }
+    command
+}
+
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .stdin(Stdio::null())
+    let output = git_command(dir, args)
         .output()
         .map_err(|e| format!("git could not start: {e}"))?;
     if output.status.success() {
@@ -311,6 +359,21 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
             args.first().copied().unwrap_or(""),
             String::from_utf8_lossy(&output.stderr).trim()
         ))
+    }
+}
+
+/// Whether `older` is `newer` or one of its ancestors. `None` when git cannot say,
+/// as when this history does not have `older`.
+fn is_ancestor(root: &Path, older: &str, newer: &str) -> Option<bool> {
+    let status = git_command(root, &["merge-base", "--is-ancestor", older, newer])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .ok()?;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
     }
 }
 
@@ -330,6 +393,15 @@ mod tests {
     }
 
     fn found(date: &str, sha: &str, broke: Option<(&str, &str)>) -> Found {
+        found_with(date, sha, broke, None)
+    }
+
+    fn found_with(
+        date: &str,
+        sha: &str,
+        broke: Option<(&str, &str)>,
+        after_recorded: Option<bool>,
+    ) -> Found {
         Found::Since {
             since: at(date, sha),
             commits: 1,
@@ -337,7 +409,31 @@ mod tests {
                 sha: sha.into(),
                 date: day(date),
             }),
+            after_recorded,
         }
+    }
+
+    #[test]
+    fn a_break_on_the_recorded_day_still_moves_the_date_later() {
+        // Recorded at commit aaa on the 10th. It broke later that same day, and
+        // held again from the 12th. The history says the break came after aaa.
+        let recorded = at("2026-01-10", "aaa");
+        let walk = found_with("2026-01-12", "ccc", Some(("2026-01-10", "bbb")), Some(true));
+        match decide(Some(&recorded), &walk, false) {
+            Change::Later { since, .. } => assert_eq!(since, at("2026-01-12", "ccc")),
+            other => panic!("{other:?}"),
+        }
+        // The same walk, when the break is known to come before the recorded commit.
+        let walk = found_with(
+            "2026-01-12",
+            "ccc",
+            Some(("2026-01-10", "bbb")),
+            Some(false),
+        );
+        assert_eq!(
+            decide(Some(&recorded), &walk, false),
+            Change::Commit(at("2026-01-10", "ccc"))
+        );
     }
 
     #[test]

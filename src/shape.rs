@@ -290,10 +290,17 @@ mod tests {
     #[test]
     fn rg_runs_as_written() {
         let plan = fit("rg -n 'interface Stage' src").unwrap();
+        // The row's own words, after the flags `ley` adds.
         assert_eq!(
-            plan.argv,
-            ["rg", "--no-config", "-n", "interface Stage", "src"]
+            plan.argv[..4],
+            [
+                "rg",
+                "--no-config",
+                "--no-ignore-global",
+                "--no-ignore-exclude"
+            ]
         );
+        assert_eq!(plan.argv[4..], ["-n", "interface Stage", "src"]);
         assert_eq!(plan.plain, None);
         assert_eq!(plan.counts, Counts::Lines);
     }
@@ -302,23 +309,20 @@ mod tests {
     fn ast_grep_gets_a_json_flag() {
         let plan = fit("ast-grep outline --type interface --match '^Stage$' src").unwrap();
         assert_eq!(plan.argv[..3], ["ast-grep", "outline", "--json=stream"]);
+        // The run that shows what a reader would see has no JSON flag.
+        let plain = plan.plain.as_ref().unwrap();
+        assert!(!plain.iter().any(|word| word.starts_with("--json")));
         assert_eq!(
-            plan.plain.as_ref().unwrap()[..3],
-            ["ast-grep", "outline", "--type"]
+            plain[plain.len() - 5..],
+            ["--type", "interface", "--match", "^Stage$", "src"]
         );
         assert_eq!(plan.counts, Counts::JsonItems);
+        // Added flags go before a `--`, so they are read as flags.
         let plan = fit("ast-grep run -p 'foo($A)' -- src").unwrap();
+        assert_eq!(plan.argv[..3], ["ast-grep", "run", "--json=stream"]);
         assert_eq!(
-            plan.argv,
-            [
-                "ast-grep",
-                "run",
-                "--json=stream",
-                "-p",
-                "foo($A)",
-                "--",
-                "src"
-            ]
+            plan.argv[plan.argv.len() - 4..],
+            ["-p", "foo($A)", "--", "src"]
         );
     }
 
@@ -332,6 +336,8 @@ mod tests {
                 "`ast-grep` needs a subcommand: run, scan, outline",
             ),
             ("rg --pre cat x src", "`--pre` is not in the shape"),
+            ("rg --hidden x src", "`--hidden` is not in the shape"),
+            ("rg --no-ignore x src", "`--no-ignore` is not in the shape"),
             ("rg Stage", "needs a path"),
             ("rg --files", "needs a path"),
             ("rg -e Stage", "needs a path"),

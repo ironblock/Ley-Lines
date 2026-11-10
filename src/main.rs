@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -241,6 +241,7 @@ fn record_since(ledger: &Ledger, dry_run: bool) -> Result<ExitCode, String> {
                 since,
                 commits,
                 broke,
+                ..
             } => {
                 let sha = since.sha.as_deref().unwrap_or("");
                 let reach = match broke {
@@ -279,7 +280,7 @@ fn record_since(ledger: &Ledger, dry_run: bool) -> Result<ExitCode, String> {
             count(updates.len() as u64, "row", "rows")
         );
     } else {
-        write(&ledger.path, &updates)?;
+        write(ledger, &updates)?;
         println!(
             "Recorded {} in {file}.",
             count(updates.len() as u64, "row", "rows")
@@ -292,8 +293,16 @@ fn record_since(ledger: &Ledger, dry_run: bool) -> Result<ExitCode, String> {
     })
 }
 
-fn write(path: &Path, updates: &[(usize, Option<ledger::Since>)]) -> Result<(), String> {
+fn write(ledger: &Ledger, updates: &[(usize, Option<ledger::Since>)]) -> Result<(), String> {
+    let path = &ledger.path;
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // The updates name rows by their position in the ledger as it was when the walk began.
+    if text != ledger.text {
+        return Err(format!(
+            "{} changed while `ley since` was reading history; nothing was written. Run it again",
+            path.display()
+        ));
+    }
     let text = ledger::record_since(&text, updates)?;
     // Never write a ledger that `ley` itself would refuse.
     if let Err(problems) = ledger::parse(&text) {
