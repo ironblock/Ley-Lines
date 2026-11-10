@@ -33,7 +33,7 @@ row = [
   { name = "no stored output", is = "the rule that nothing a command printed is kept in a row: no value, no file position, no line number, no matched text", said = [{ by = "Claude Fable 5.2, restating Corey Vixie", on = 2026-11-10 }] },
   { name = "no stored output", run = "rg -l -F '# breaks: stored-output' fixtures/invalid", shows = "the broken ledgers that show what this rule refuses", count = 2, since = 2026-11-10, sha = "e51337a717b4" },
   { name = "a command or a source", is = "the rule that every sentence in a ledger is either what a command shows or what a named source said on a date", said = [{ by = "Claude Fable 5.2", on = 2026-11-10 }] },
-  { name = "a command or a source", run = "rg -l -F '# breaks: source' fixtures/invalid", shows = "the broken ledgers that show what this rule refuses", count = 5, since = 2026-11-10, sha = "e51337a717b4" },
+  { name = "a command or a source", run = "rg -l -F '# breaks: source' fixtures/invalid", shows = "the broken ledgers that show what this rule refuses", count = 5, since = 2026-11-10, sha = "b3c7948adf94" },
   { name = "no grades", is = "the rule that a ledger records who said a thing and when, and assigns no level of trust", said = [{ by = "Claude Fable 5.2", on = 2026-11-10 }] },
   { name = "no instructions", is = "the rule that a row states a fact and leaves the reader to decide whether to run anything", said = [{ by = "Claude Fable 5.2, restating Corey Vixie", on = 2026-11-10 }] },
   { name = "one row per line", is = "the rule that each row is one line of the file, so one search returns the whole row", said = [{ by = "Claude Fable 5.2", on = 2026-11-10 }] },
