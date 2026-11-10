@@ -1,0 +1,21 @@
+[package]
+name = "ley-lines"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A ledger of facts about one place, each with a command that shows it."
+license = "Apache-2.0"
+repository = "https://github.com/ironblock/Ley-Lines"
+readme = "README.md"
+
+[[bin]]
+name = "ley"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tempfile = "3.27.0"
+toml = "1.2.1"
+toml_edit = "0.25.19"

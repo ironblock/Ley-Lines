@@ -1,0 +1,77 @@
+# The commands `ley check` will run.
+#
+# A row's command must fit one of these shapes: the program, then only the flags
+# listed here. A command that fits no shape is still shown to readers. It is never
+# run, and `check` reports it as "not checked".
+#
+# `flags` take no value. `options` take one value. `path_options` are options whose
+# value is a path. Every path must be relative and stay inside the ledger's directory.
+#
+# To add a flag: add it here, and add a line to fixtures/commands.toml.
+# Leave out any flag that writes files, runs another program, or changes what one
+# result means.
+
+[[shape]]
+program = "rg"
+about = "search text; each line printed is one result"
+counts = "lines"
+# With no path, rg reads standard input when that is a pipe. The same command
+# would then show different things to different readers.
+needs_path = true
+# The first word that is not a flag is the pattern, unless one of these is present.
+no_pattern_with = ["-e", "--regexp", "--files"]
+flags = [
+  "-n", "--line-number",
+  "-N", "--no-line-number",
+  "-i", "--ignore-case",
+  "-s", "--case-sensitive",
+  "-S", "--smart-case",
+  "-w", "--word-regexp",
+  "-x", "--line-regexp",
+  "-F", "--fixed-strings",
+  "-o", "--only-matching",
+  "-l", "--files-with-matches",
+  "--files",
+  "--hidden",
+  "--no-ignore",
+]
+options = [
+  "-e", "--regexp",
+  "-g", "--glob",
+  "-t", "--type",
+  "-T", "--type-not",
+]
+
+[[shape]]
+program = "ast-grep"
+sub = "run"
+about = "match a code pattern; each match is one result"
+counts = "json-lines"
+needs_one_of = ["-p", "--pattern", "-k", "--kind"]
+options = [
+  "-p", "--pattern",
+  "-k", "--kind",
+  "-l", "--lang",
+  "--selector",
+  "--strictness",
+  "--globs",
+]
+
+[[shape]]
+program = "ast-grep"
+sub = "scan"
+about = "match a rule; each match is one result"
+counts = "json-lines"
+# Without one of these, scan reads the project's own rule files, and the row
+# would no longer say what it searches for.
+needs_one_of = ["--inline-rules", "-r", "--rule"]
+options = ["--inline-rules", "-r", "--rule", "--globs"]
+path_options = ["-r", "--rule"]
+
+[[shape]]
+program = "ast-grep"
+sub = "outline"
+about = "list the symbols in files; each top-level symbol is one result"
+counts = "json-items"
+# `--view` changes how the text is laid out, not which symbols are listed.
+options = ["-l", "--lang", "--items", "--type", "--match", "--view", "--globs"]
