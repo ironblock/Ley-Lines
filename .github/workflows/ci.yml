@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the programs that rows name
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep
+          npm install --global @ast-grep/cli@0.51.1
+          rg --version
+          ast-grep --version
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+        env:
+          # A test that cannot find rg, ast-grep or git fails instead of skipping.
+          LEY_TEST_REQUIRE_TOOLS: "1"
+
+      - name: Check this repository's own ledger
+        run: cargo run --locked --quiet -- check --strict
+
+      - name: Check the example's ledger
+        run: cargo run --locked --quiet -- --ledger examples/pipeline/ley.toml check --strict
