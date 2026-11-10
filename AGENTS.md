@@ -36,4 +36,5 @@ The tests start `rg`, `ast-grep` and `git`. A test that needs a missing program 
 - Write for a reader who was never in the room. Use short sentences, one idea in each, and plain words. Use one term for one thing.
 - Examples use invented names. Nothing from a real organization goes into this repository: no codenames, no stage names, no error strings.
 - A row says only what its command can show, or it names who said it. If you are the one saying it, name yourself in `said`.
+- A person's name in `said` means that person approved the row. Add your own name to what you write. Do not add someone else's name for them.
 - Do not store what a command printed, anywhere. Store the command.
