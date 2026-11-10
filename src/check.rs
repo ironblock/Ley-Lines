@@ -7,6 +7,7 @@ use crate::command;
 use crate::ledger::{Ledger, Pointer, Row};
 use crate::run::{self, Outcome};
 use crate::shape::{self, Plan};
+use crate::text;
 
 /// What became of one row's command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,10 +38,22 @@ pub fn status(pointer: &Pointer, dir: &Path, limit: Duration) -> Status {
 }
 
 fn counted(pointer: &Pointer, plan: &Plan, dir: &Path, limit: Duration) -> Status {
+    counted_and_printed(pointer, plan, dir, limit).0
+}
+
+/// The status of the count, and, when the row holds, the text the counting run printed.
+fn counted_and_printed(
+    pointer: &Pointer,
+    plan: &Plan,
+    dir: &Path,
+    limit: Duration,
+) -> (Status, Option<String>) {
     match run::run(plan, dir, limit) {
-        Outcome::Count { results, .. } if results == pointer.count => Status::Holds,
-        Outcome::Count { results, note } => Status::Differs { got: results, note },
-        Outcome::Failed(why) => Status::CouldNotRun(why),
+        Outcome::Count {
+            results, printed, ..
+        } if results == pointer.count => (Status::Holds, Some(printed)),
+        Outcome::Count { results, note, .. } => (Status::Differs { got: results, note }, None),
+        Outcome::Failed(why) => (Status::CouldNotRun(why), None),
     }
 }
 
@@ -127,7 +140,7 @@ impl Tally {
         let mut parts = Vec::new();
         let mut part = |n: usize, one: &str, many: &str| {
             if n > 0 {
-                parts.push(format!("{n} {}", if n == 1 { one } else { many }));
+                parts.push(text::count(n as u64, one, many));
             }
         };
         part(self.hold, "holds", "hold");
@@ -136,17 +149,17 @@ impl Tally {
         part(self.could_not_run, "could not run", "could not run");
         part(self.not_checked, "not checked", "not checked");
         part(self.no_command, "has no command", "have no command");
-        let rows = if self.rows == 1 { "row" } else { "rows" };
+        let rows = text::count(self.rows as u64, "row", "rows");
         if parts.is_empty() {
-            format!("{} {rows}.", self.rows)
+            format!("{rows}.")
         } else {
-            format!("{} {rows}: {}.", self.rows, parts.join(", "))
+            format!("{rows}: {}.", parts.join(", "))
         }
     }
 }
 
 fn results(n: u64) -> String {
-    format!("{n} {}", if n == 1 { "result" } else { "results" })
+    text::count(n, "result", "results")
 }
 
 /// Check every row. Returns the lines to print, and the tally.
@@ -168,16 +181,18 @@ pub fn check(ledger: &Ledger, verbose: bool, limit: Duration) -> (Vec<String>, T
 
         let status = match fit(pointer) {
             Err(why) => Status::NotChecked(why),
-            Ok(plan) => match counted(pointer, &plan, dir, limit) {
-                Status::Holds => {
-                    // Compare `shows` with what a reader would see: the command as written.
-                    let printed = run::printed(&plan, dir, limit);
-                    match printed.and_then(|text| restated(pointer, &row.name, &text)) {
+            Ok(plan) => match counted_and_printed(pointer, &plan, dir, limit) {
+                (Status::Holds, printed) => {
+                    // Compare `shows` with the text a reader would see. For rg that is
+                    // what the counting run printed. For ast-grep, `ley` counted JSON,
+                    // so the command runs once more without it.
+                    let seen = run::plain(&plan, dir, limit).or(printed);
+                    match seen.and_then(|text| restated(pointer, &row.name, &text)) {
                         Some(text) => Status::Restates(text),
                         None => Status::Holds,
                     }
                 }
-                other => other,
+                (other, _) => other,
             },
         };
 

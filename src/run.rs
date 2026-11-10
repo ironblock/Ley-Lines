@@ -23,6 +23,8 @@ pub enum Outcome {
         results: u64,
         /// The first thing the program said on standard error, if anything.
         note: Option<String>,
+        /// What the counting run printed.
+        printed: String,
     },
     /// The command could not run, or said it failed.
     Failed(String),
@@ -80,11 +82,10 @@ fn start(argv: &[String], dir: &Path, limit: Duration) -> Result<Ran, String> {
     let err = stderr.join().unwrap_or_default();
 
     let said = |line: &str| format!("{program} said: {}", line.trim());
-    let note = err.lines().find(|line| !line.trim().is_empty());
-    let error = err
+    let note = err
         .lines()
-        .find(|line| line.trim_start().to_ascii_lowercase().starts_with("error"));
-    if let Some(line) = error {
+        .find(|line| !line.trim().is_empty() && !is_a_tally_of_findings(line));
+    if let Some(line) = err.lines().find(|line| reports_an_error(line)) {
         return Err(said(line));
     }
     match status.code() {
@@ -100,18 +101,33 @@ fn start(argv: &[String], dir: &Path, limit: Duration) -> Result<Ran, String> {
     }
 }
 
+/// True for a line on standard error that says the program failed.
+fn reports_an_error(line: &str) -> bool {
+    line.trim_start().to_ascii_lowercase().starts_with("error") && !is_a_tally_of_findings(line)
+}
+
+/// `ast-grep scan` ends with "Error: 1 error(s) found in code." when a rule whose
+/// severity is `error` matched. That is a count of matches, not a failed run.
+fn is_a_tally_of_findings(line: &str) -> bool {
+    line.trim()
+        .strip_prefix("Error: ")
+        .and_then(|rest| rest.strip_suffix(" error(s) found in code."))
+        .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+}
+
 /// Run a command and count what it shows.
 pub fn run(plan: &Plan, dir: &Path, limit: Duration) -> Outcome {
     let ran = match start(&plan.argv, dir, limit) {
         Ok(ran) => ran,
         Err(why) => return Outcome::Failed(why),
     };
-    let lines = ran.out.lines().filter(|line| !line.trim().is_empty());
     let results = match plan.counts {
-        Counts::Lines | Counts::JsonLines => lines.count() as u64,
+        // Every line is a result, an empty one too: `rg -x ''` prints empty lines.
+        Counts::Lines => ran.out.lines().count() as u64,
+        Counts::JsonLines => ran.out.lines().filter(|l| !l.trim().is_empty()).count() as u64,
         Counts::JsonItems => {
             let mut items = 0;
-            for line in lines {
+            for line in ran.out.lines().filter(|l| !l.trim().is_empty()) {
                 let listed = serde_json::from_str::<serde_json::Value>(line)
                     .ok()
                     .and_then(|file| file.get("items")?.as_array().map(Vec::len));
@@ -131,12 +147,14 @@ pub fn run(plan: &Plan, dir: &Path, limit: Duration) -> Outcome {
     Outcome::Count {
         results,
         note: ran.note,
+        printed: ran.out,
     }
 }
 
-/// What a reader would see: the output of the command exactly as the row has it.
-pub fn printed(plan: &Plan, dir: &Path, limit: Duration) -> Option<String> {
-    start(&plan.written, dir, limit).ok().map(|ran| ran.out)
+/// The text a reader would see, when the counting run printed something else.
+pub fn plain(plan: &Plan, dir: &Path, limit: Duration) -> Option<String> {
+    let argv = plan.plain.as_ref()?;
+    start(argv, dir, limit).ok().map(|ran| ran.out)
 }
 
 fn drain(stream: Option<impl Read + Send + 'static>) -> thread::JoinHandle<String> {
@@ -147,4 +165,22 @@ fn drain(stream: Option<impl Read + Send + 'static>) -> thread::JoinHandle<Strin
         }
         String::from_utf8_lossy(&bytes).into_owned()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_tally_of_findings_is_not_an_error() {
+        assert!(is_a_tally_of_findings("Error: 1 error(s) found in code."));
+        assert!(is_a_tally_of_findings("Error: 12 error(s) found in code."));
+        assert!(!reports_an_error("Error: 1 error(s) found in code."));
+        assert!(reports_an_error("Error: Cannot parse rule INLINE_RULES"));
+        assert!(reports_an_error(
+            "ERROR: nowhere: No such file or directory (os error 2)"
+        ));
+        assert!(reports_an_error("error: unrecognized subcommand 'outline'"));
+        assert!(!reports_an_error("Warning: Pattern contains an ERROR node"));
+    }
 }

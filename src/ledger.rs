@@ -193,22 +193,8 @@ pub fn parse(text: &str) -> Result<Vec<Row>, Vec<Problem>> {
     match table.get("row") {
         None => {}
         Some(Value::Array(values)) => {
-            let opener = layout.opener.unwrap_or(1);
-            if !layout.broken && layout.rows.len() != values.len() {
-                problems.push(Problem::new(
-                    opener,
-                    "one-line",
-                    format!(
-                        "{} rows are written on {} lines: write each row on its own line, \
-                         so that one search returns the whole row",
-                        values.len(),
-                        layout.rows.len()
-                    ),
-                ));
-            }
-            let lines_match = layout.rows.len() == values.len();
             for (i, value) in values.iter().enumerate() {
-                let line = if lines_match { layout.rows[i] } else { opener };
+                let line = layout.rows.get(i).copied().unwrap_or(layout.opener);
                 rows.extend(row(value, line, &mut problems));
             }
         }
@@ -226,73 +212,80 @@ pub fn parse(text: &str) -> Result<Vec<Row>, Vec<Problem>> {
         Ok(rows)
     } else {
         problems.sort_by_key(|p| p.line);
+        problems.dedup();
         Err(problems)
     }
 }
 
 struct Layout {
-    /// The line that holds `row = [`.
-    opener: Option<usize>,
+    /// The line the list of rows starts on.
+    opener: usize,
     /// The line of each row, in order.
     rows: Vec<usize>,
-    /// A layout problem was already reported.
-    broken: bool,
 }
 
 /// Check that every row is one whole line, and note which line each row is on.
 ///
 /// One row per line means one search for a name returns the whole row, and one
-/// changed row is one changed line.
+/// changed row is one changed line. The positions come from the TOML parser's own
+/// record of where each value sits, so this cannot disagree with the parser.
 fn layout(text: &str, problems: &mut Vec<Problem>) -> Layout {
     let mut found = Layout {
-        opener: None,
+        opener: 1,
         rows: Vec::new(),
-        broken: false,
     };
-    let mut inside = false;
-    for (index, raw) in text.lines().enumerate() {
-        let line = index + 1;
-        let trimmed = raw.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+    let Ok(document) = toml_edit::Document::parse(text) else {
+        return found;
+    };
+    let Some(item) = document.as_table().get("row") else {
+        return found;
+    };
+    if let Some(blocks) = item.as_array_of_tables() {
+        found.opener = blocks.span().map_or(1, |span| line_at(text, span.start));
+        problems.push(Problem::new(
+            found.opener,
+            "one-line",
+            "write rows as lines inside `row = [ … ]`, not as `[[row]]` blocks: \
+             then one search returns the whole row",
+        ));
+        return found;
+    }
+    let Some(array) = item.as_array() else {
+        return found;
+    };
+    if let Some(span) = array.span() {
+        found.opener = line_at(text, span.start);
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    for value in array.iter() {
+        let Some(span) = value.span() else {
+            found.rows.push(found.opener);
+            continue;
+        };
+        let first = line_at(text, span.start);
+        let last = line_at(text, span.end.max(span.start + 1) - 1);
+        found.rows.push(first);
+        if first != last {
+            problems.push(Problem::new(
+                first,
+                "one-line",
+                format!(
+                    "this row is spread over lines {first} to {last}: write each row on \
+                     one line, so that one search returns the whole row"
+                ),
+            ));
             continue;
         }
-        let squeezed: String = trimmed.split_whitespace().collect();
-        if inside {
-            if trimmed == "]" {
-                inside = false;
-            } else if trimmed.starts_with('{')
-                && (trimmed.ends_with("},") || trimmed.ends_with('}'))
-            {
-                found.rows.push(line);
-            } else {
-                found.broken = true;
-                problems.push(Problem::new(
-                    line,
-                    "one-line",
-                    "this line is not a whole row: a row starts with `{` and ends with `},` \
-                     on the same line",
-                ));
-            }
-        } else if squeezed == "row=[" {
-            found.opener = Some(line);
-            inside = true;
-        } else if squeezed == "row=[]" {
-            found.opener = Some(line);
-        } else if squeezed.starts_with("[[row]]") || squeezed.starts_with("[row") {
-            found.broken = true;
+        let on_the_line = lines
+            .get(first - 1)
+            .map_or("", |line| line.trim_start_matches('\u{feff}').trim());
+        let row = &text[span];
+        if on_the_line != row && on_the_line.strip_suffix(',') != Some(row) {
             problems.push(Problem::new(
-                line,
+                first,
                 "one-line",
-                "write rows as lines inside `row = [ … ]`, not as `[[row]]` blocks: \
-                 then one search returns the whole row",
-            ));
-        } else if squeezed.starts_with("row=[") {
-            found.broken = true;
-            found.opener = Some(line);
-            problems.push(Problem::new(
-                line,
-                "one-line",
-                "put `row = [` on a line of its own, then one row per line, then `]`",
+                "a row shares this line with something else: put each row on a line \
+                 of its own, as `{ … },`",
             ));
         }
     }
@@ -591,22 +584,42 @@ fn date(when: &Datetime) -> Option<Date> {
     }
 }
 
-/// Find text that records where a match was: `src/a.rs:12`, or `line 12`.
+/// File endings that mark a word as a file, so that `stage.ts:12` is a position
+/// and `billing.internal:8443` is not.
+const FILE_ENDINGS: [&str; 36] = [
+    "c", "cc", "cfg", "conf", "cpp", "cs", "css", "go", "h", "hpp", "html", "ini", "java", "js",
+    "json", "jsx", "kt", "lock", "md", "php", "py", "rb", "rs", "scala", "sh", "sql", "swift",
+    "toml", "ts", "tsx", "txt", "vue", "xml", "yaml", "yml", "zig",
+];
+
+/// Find text that records where a match was: `src/a.rs:12`, or `on line 12`.
 fn stored_output(text: &str) -> Option<String> {
     let words: Vec<&str> = text.split_whitespace().collect();
+    let starts_with_digit = |s: &str| s.chars().next().is_some_and(|c| c.is_ascii_digit());
+    let lower = |i: usize| words.get(i).map(|word| word.to_ascii_lowercase());
     for (i, word) in words.iter().enumerate() {
-        let starts_with_digit = |s: &str| s.chars().next().is_some_and(|c| c.is_ascii_digit());
-        if matches!(word.to_ascii_lowercase().as_str(), "line" | "lines")
+        // "on line 12" and "line 12 of stage.ts" are positions. "the line 2 team" is not.
+        if matches!(lower(i).as_deref(), Some("line" | "lines"))
             && words.get(i + 1).is_some_and(|next| starts_with_digit(next))
         {
-            return Some(format!("{word} {}", words[i + 1]));
+            let before = i.checked_sub(1).and_then(lower);
+            if matches!(before.as_deref(), Some("on" | "at" | "from"))
+                || matches!(lower(i + 2).as_deref(), Some("of" | "in"))
+            {
+                return Some(format!("{word} {}", words[i + 1]));
+            }
         }
         if word.contains("://") {
             continue;
         }
         for (at, _) in word.match_indices(':') {
             let (file, rest) = (&word[..at], &word[at + 1..]);
-            if file.contains(['.', '/']) && starts_with_digit(rest) {
+            let ending = file
+                .rsplit_once('.')
+                .map(|(_, end)| end.to_ascii_lowercase());
+            let is_a_file = file.contains('/')
+                || ending.is_some_and(|end| FILE_ENDINGS.contains(&end.as_str()));
+            if is_a_file && starts_with_digit(rest) {
                 return Some((*word).to_string());
             }
         }
@@ -636,10 +649,11 @@ fn line_starting_with(text: &str, key: &str) -> Option<usize> {
         .map(|index| index + 1)
 }
 
-/// Record `since` and `sha` on rows, changing nothing else in the file.
+/// Record `since` and `sha` on rows, or remove them, changing nothing else in the file.
 ///
 /// `updates` holds the position of each row in the ledger, and what to record.
-pub fn record_since(text: &str, updates: &[(usize, Since)]) -> Result<String, String> {
+/// `None` removes both keys.
+pub fn record_since(text: &str, updates: &[(usize, Option<Since>)]) -> Result<String, String> {
     let mut doc: toml_edit::DocumentMut = text
         .parse()
         .map_err(|e| format!("the ledger is not valid TOML: {e}"))?;
@@ -652,17 +666,25 @@ pub fn record_since(text: &str, updates: &[(usize, Since)]) -> Result<String, St
             .get_mut(*index)
             .and_then(|value| value.as_inline_table_mut())
             .ok_or_else(|| format!("row {} is not a table on one line", index + 1))?;
-        let date: toml_edit::Datetime = since
-            .date
-            .to_string()
-            .parse()
-            .map_err(|e| format!("{}: {e}", since.date))?;
-        row.insert("since", toml_edit::Value::from(date));
-        match &since.sha {
-            Some(sha) => {
-                row.insert("sha", toml_edit::Value::from(sha.as_str()));
+        match since {
+            Some(since) => {
+                let date: toml_edit::Datetime = since
+                    .date
+                    .to_string()
+                    .parse()
+                    .map_err(|e| format!("{}: {e}", since.date))?;
+                row.insert("since", toml_edit::Value::from(date));
+                match &since.sha {
+                    Some(sha) => {
+                        row.insert("sha", toml_edit::Value::from(sha.as_str()));
+                    }
+                    None => {
+                        row.remove("sha");
+                    }
+                }
             }
             None => {
+                row.remove("since");
                 row.remove("sha");
             }
         }
@@ -677,25 +699,35 @@ mod tests {
 
     #[test]
     fn stored_output_is_found() {
-        assert_eq!(
-            stored_output("defined at src/a.rs:12").as_deref(),
-            Some("src/a.rs:12")
-        );
-        assert_eq!(
-            stored_output("see a.rs:12:3 for it").as_deref(),
-            Some("a.rs:12:3")
-        );
-        assert_eq!(
-            stored_output("it is on line 40").as_deref(),
-            Some("line 40")
-        );
-        assert_eq!(stored_output("the run at 10:30 each night"), None);
-        assert_eq!(
-            stored_output("the page at https://example.org:8080/x"),
-            None
-        );
-        assert_eq!(stored_output("the line each stage is declared on"), None);
-        assert_eq!(stored_output("the type Foo::Bar"), None);
+        for (text, found) in [
+            ("defined at src/a.rs:12", Some("src/a.rs:12")),
+            ("see a.rs:12:3 for it", Some("a.rs:12:3")),
+            ("it is on line 40", Some("line 40")),
+            (
+                "the interface declared on line 3 of stage.ts",
+                Some("line 3"),
+            ),
+            ("line 12 of the glossary", Some("line 12")),
+            // Not positions:
+            ("the run at 10:30 each night", None),
+            ("the page at https://example.org:8080/x", None),
+            ("the proxy that listens on billing.internal:8443", None),
+            ("the host 10.0.0.5:443", None),
+            ("the ratio v1.2:3", None),
+            ("the line each stage is declared on", None),
+            ("the line 2 escalation team", None),
+            ("the type Foo::Bar", None),
+        ] {
+            assert_eq!(stored_output(text).as_deref(), found, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_row_takes_its_line_from_the_parser() {
+        // A byte-order mark, a comment, and a blank line do not shift the count.
+        let text = "\u{feff}# first\nrow = [\n\n  { name = \"a\" },\n]\n";
+        let problems = parse(text).unwrap_err();
+        assert_eq!((problems[0].line, problems[0].rule), (4, "empty-row"));
     }
 
     #[test]
@@ -705,14 +737,16 @@ mod tests {
             date: "2026-11-09".parse::<Datetime>().unwrap().date.unwrap(),
             sha: Some("0123456789ab".into()),
         };
-        let out = record_since(text, &[(0, since.clone())]).unwrap();
+        let out = record_since(text, &[(0, Some(since.clone()))]).unwrap();
         let expected = text.replace(
             "shows = \"x\" }",
             "shows = \"x\", since = 2026-11-09, sha = \"0123456789ab\" }",
         );
         assert_eq!(out, expected);
         // Recording the same thing again changes nothing.
-        assert_eq!(record_since(&out, &[(0, since)]).unwrap(), out);
+        assert_eq!(record_since(&out, &[(0, Some(since))]).unwrap(), out);
         assert!(parse(&out).is_ok());
+        // Removing it gives the first file back.
+        assert_eq!(record_since(&out, &[(0, None)]).unwrap(), text);
     }
 }

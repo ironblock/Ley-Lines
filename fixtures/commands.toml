@@ -1,6 +1,7 @@
 # Commands, and what `ley check` makes of each.
 #
-# `argv` is the program and arguments `ley` starts, with no shell.
+# `argv` is the program and arguments `ley` starts, with no shell. It is the row's
+# command plus the flags `ley` adds: `--no-config` for rg, `--json=stream` for ast-grep.
 # `refused` is part of the reason a command is not run. `why` says it in plain words.
 # A refused command is still a valid row: readers see it, and `ley check` reports
 # it as "not checked".
@@ -9,39 +10,39 @@
 
 [[command]]
 run = "rg -n -F Quillon docs/glossary.md"
-argv = ["rg", "-n", "-F", "Quillon", "docs/glossary.md"]
+argv = ["rg", "--no-config", "-n", "-F", "Quillon", "docs/glossary.md"]
 
 [[command]]
 run = "rg -n 'interface Stage' services"
-argv = ["rg", "-n", "interface Stage", "services"]
+argv = ["rg", "--no-config", "-n", "interface Stage", "services"]
 
 [[command]]
 run = "rg --files -g '*.toml' config"
-argv = ["rg", "--files", "-g", "*.toml", "config"]
+argv = ["rg", "--no-config", "--files", "-g", "*.toml", "config"]
 
 [[command]]
 run = "rg -e alpha -e beta notes docs"
-argv = ["rg", "-e", "alpha", "-e", "beta", "notes", "docs"]
+argv = ["rg", "--no-config", "-e", "alpha", "-e", "beta", "notes", "docs"]
 
 [[command]]
 run = "rg -l --type=ts -- '-retries' services"
-argv = ["rg", "-l", "--type=ts", "--", "-retries", "services"]
+argv = ["rg", "--no-config", "-l", "--type=ts", "--", "-retries", "services"]
 
 [[command]]
 run = "ast-grep run -l ts -p 'interface $NAME { $$$ }' services"
-argv = ["ast-grep", "run", "-l", "ts", "-p", "interface $NAME { $$$ }", "services", "--json=stream"]
+argv = ["ast-grep", "run", "--json=stream", "-l", "ts", "-p", "interface $NAME { $$$ }", "services"]
 
 [[command]]
 run = "ast-grep run --kind interface_declaration services"
-argv = ["ast-grep", "run", "--kind", "interface_declaration", "services", "--json=stream"]
+argv = ["ast-grep", "run", "--json=stream", "--kind", "interface_declaration", "services"]
 
 [[command]]
 run = "ast-grep scan --inline-rules '{id: r, language: ts, rule: {kind: interface_declaration}}' services"
-argv = ["ast-grep", "scan", "--inline-rules", "{id: r, language: ts, rule: {kind: interface_declaration}}", "services", "--json=stream"]
+argv = ["ast-grep", "scan", "--json=stream", "--inline-rules", "{id: r, language: ts, rule: {kind: interface_declaration}}", "services"]
 
 [[command]]
 run = "ast-grep outline --type interface --match '^Stage$' --view expanded services"
-argv = ["ast-grep", "outline", "--type", "interface", "--match", "^Stage$", "--view", "expanded", "services", "--json=stream"]
+argv = ["ast-grep", "outline", "--json=stream", "--type", "interface", "--match", "^Stage$", "--view", "expanded", "services"]
 
 # ---- no shape for the program
 
@@ -98,6 +99,11 @@ why = "This lets a repository load a native library, which can run any code."
 run = "rg Stage"
 refused = "needs a path"
 why = "With no path, rg searches standard input when that is a pipe, and the directory when it is not. Two readers would see two different things."
+
+[[command]]
+run = "rg -n Stage -"
+refused = "`-` means standard input"
+why = "For rg, `-` is not a path. It reads whatever is piped in, which differs from reader to reader."
 
 [[command]]
 run = "rg -n Stage /srv/billing/services"

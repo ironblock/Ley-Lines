@@ -407,6 +407,247 @@ Recorded 2 rows in ley.toml.
     assert_eq!(history.git(&["status", "--porcelain"], ""), "M ley.toml");
 }
 
+/// A ledger with one row, for the tests below.
+fn one_row(dir: &Path, row: &str) {
+    fs::write(dir.join("ley.toml"), format!("row = [\n  {row}\n]\n")).unwrap();
+}
+
+// The next tests each come from a review of this program. Every case was reproduced
+// before it was fixed.
+
+#[test]
+fn a_rule_whose_severity_is_error_is_counted_and_not_failed() {
+    if !have(&["ast-grep"]) {
+        return;
+    }
+    let (_holder, dir) = example();
+    // ast-grep then ends with "Error: 1 error(s) found in code." That is a count of matches.
+    one_row(
+        &dir,
+        r#"{ name = "interface", run = "ast-grep scan --inline-rules '{id: r, language: ts, severity: error, rule: {kind: interface_declaration}}' services", shows = "each interface under services" },"#,
+    );
+    let output = ley(&dir, &["check"]);
+    assert_eq!(stdout(&output), "1 row: 1 holds.\n");
+    assert!(output.status.success());
+}
+
+#[test]
+fn a_personal_ripgrep_configuration_changes_nothing() {
+    if !have(&["rg"]) {
+        return;
+    }
+    let (holder, dir) = example();
+    let config = holder.path().join("ripgreprc");
+    fs::write(&config, "--context=1\n--smart-case\n").unwrap();
+    one_row(
+        &dir,
+        r#"{ name = "Quillon", run = "rg -n -F Quillon docs/glossary.md", shows = "the glossary line that defines Quillon" },"#,
+    );
+    let output = Command::new(LEY)
+        .arg("check")
+        .current_dir(&dir)
+        .env("RIPGREP_CONFIG_PATH", &config)
+        .output()
+        .unwrap();
+    assert_eq!(stdout(&output), "1 row: 1 holds.\n");
+}
+
+#[test]
+fn an_empty_line_that_rg_prints_is_a_result() {
+    if !have(&["rg"]) {
+        return;
+    }
+    let (_holder, dir) = example();
+    fs::write(dir.join("blanks.txt"), "\n\n\n").unwrap();
+    one_row(
+        &dir,
+        r#"{ name = "blank", run = "rg -x '' blanks.txt", shows = "each empty line of the file", count = 3 },"#,
+    );
+    assert_eq!(stdout(&ley(&dir, &["check"])), "1 row: 1 holds.\n");
+}
+
+#[test]
+fn show_lists_a_name_once_whatever_its_capitals() {
+    let holder = tempfile::tempdir().unwrap();
+    fs::write(
+        holder.path().join("ley.toml"),
+        "row = [\n  { name = \"Stage\", run = \"rg -n a src\", shows = \"a\" },\n  { name = \"stage\", run = \"rg -n b src\", shows = \"b\" },\n]\n",
+    )
+    .unwrap();
+    assert_eq!(
+        stdout(&ley(holder.path(), &["show"])),
+        "Stage  how to see it\n"
+    );
+}
+
+const ALPHA_ROW: &str =
+    "{ name = \"alpha\", run = \"rg -n -F alpha src\", shows = \"the line with alpha\" },";
+
+#[test]
+fn since_keeps_a_recorded_date_in_a_shallow_clone() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("src/words.txt", "alpha\n", "2026-01-01");
+    history.commit(
+        "ley.toml",
+        &format!("row = [\n  {ALPHA_ROW}\n]\n"),
+        "2026-02-01",
+    );
+    assert!(ley(&history.dir, &["since"]).status.success());
+    let recorded = fs::read_to_string(history.dir.join("ley.toml")).unwrap();
+    assert!(recorded.contains("since = 2026-01-01"), "{recorded}");
+    history.commit("ley.toml", &recorded, "2026-03-01");
+
+    // A clone with one commit sees the row hold from 2026-03-01. That is no reason
+    // to say the fact is newer than it is.
+    let shallow = history.dir.with_file_name("shallow");
+    let url = format!("file://{}", history.dir.display());
+    let cloned = Command::new("git")
+        .args(["clone", "--quiet", "--depth", "1", &url])
+        .arg(&shallow)
+        .output()
+        .unwrap();
+    assert!(
+        cloned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cloned.stderr)
+    );
+    let output = ley(&shallow, &["since"]);
+    let printed = stdout(&output);
+    assert_eq!(
+        printed,
+        "ley.toml:2: \"alpha\": the recorded date is kept: this clone holds only part of the history\nNothing to record.\n"
+    );
+    assert_eq!(
+        fs::read_to_string(shallow.join("ley.toml")).unwrap(),
+        recorded
+    );
+}
+
+#[test]
+fn since_moves_a_date_later_only_past_a_commit_where_the_row_broke() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("src/words.txt", "beta\n", "2026-01-01");
+    let recorded = history.commit("src/words.txt", "alpha\nbeta\n", "2026-02-01");
+    let broke = history.commit("src/words.txt", "beta\n", "2026-03-01");
+    let again = history.commit("src/words.txt", "alpha\nbeta\n", "2026-04-01");
+    let row = ALPHA_ROW.replace(
+        " },",
+        &format!(", since = 2026-02-01, sha = \"{}\" }},", &recorded[..12]),
+    );
+    history.commit("ley.toml", &format!("row = [\n  {row}\n]\n"), "2026-05-01");
+
+    let printed = stdout(&ley(&history.dir, &["since"]));
+    assert_eq!(
+        printed,
+        format!(
+            "ley.toml:2: \"alpha\": true since at least 2026-04-01 (commit {}, held at 2 commits): moved later, because the row did not hold at commit {}\nRecorded 1 row in ley.toml.\n",
+            &again[..12],
+            &broke[..12]
+        )
+    );
+    let text = fs::read_to_string(history.dir.join("ley.toml")).unwrap();
+    assert!(
+        text.contains(&format!("since = 2026-04-01, sha = \"{}\"", &again[..12])),
+        "{text}"
+    );
+}
+
+#[test]
+fn since_keeps_the_date_when_the_recorded_commit_is_gone() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    // As after a squash: the recorded commit is not in this history, and the commit
+    // before the row starts to hold is older than the recorded date.
+    let history = History::new();
+    history.commit("src/words.txt", "other\n", "2026-01-01");
+    fs::write(history.dir.join("src/words.txt"), "alpha\n").unwrap();
+    let row = ALPHA_ROW.replace(" },", ", since = 2026-01-15, sha = \"0123456789ab\" },");
+    let squashed = history.commit("ley.toml", &format!("row = [\n  {row}\n]\n"), "2026-05-01");
+
+    let printed = stdout(&ley(&history.dir, &["since"]));
+    assert_eq!(
+        printed,
+        format!(
+            "ley.toml:2: \"alpha\": true since at least 2026-01-15: the date is kept, and the commit is now {}, the earliest one in this history\nRecorded 1 row in ley.toml.\n",
+            &squashed[..12]
+        )
+    );
+    let text = fs::read_to_string(history.dir.join("ley.toml")).unwrap();
+    assert!(
+        text.contains(&format!(
+            "since = 2026-01-15, sha = \"{}\"",
+            &squashed[..12]
+        )),
+        "{text}"
+    );
+}
+
+#[test]
+fn since_removes_the_date_of_a_row_that_no_longer_holds() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("src/words.txt", "other\n", "2026-01-01");
+    let row = ALPHA_ROW.replace(" },", ", since = 2025-06-01, sha = \"0123456789ab\" },");
+    history.commit("ley.toml", &format!("row = [\n  {row}\n]\n"), "2026-02-01");
+
+    let output = ley(&history.dir, &["since"]);
+    assert!(output.status.success());
+    assert_eq!(
+        stdout(&output),
+        "ley.toml:2: \"alpha\": does not hold at the current commit (the command showed 0): the recorded date is removed\nRecorded 1 row in ley.toml.\n"
+    );
+    let text = fs::read_to_string(history.dir.join("ley.toml")).unwrap();
+    assert_eq!(text, format!("row = [\n  {ALPHA_ROW}\n]\n"));
+}
+
+#[test]
+fn since_says_so_when_a_program_could_not_run() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("src/words.txt", "alpha\n", "2026-01-01");
+    let row = ALPHA_ROW.replace(" },", ", since = 2026-01-01, sha = \"0123456789ab\" },");
+    let ledger = format!("row = [\n  {row}\n]\n");
+    history.commit("ley.toml", &ledger, "2026-02-01");
+
+    // A PATH that has git and nothing else.
+    let bin = history.dir.with_file_name("only-git");
+    fs::create_dir(&bin).unwrap();
+    let git = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let git = String::from_utf8_lossy(&git.stdout).trim().to_string();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&git, bin.join("git")).unwrap();
+    let output = Command::new(LEY)
+        .arg("since")
+        .current_dir(&history.dir)
+        .env("PATH", &bin)
+        .output()
+        .unwrap();
+    assert_eq!(
+        stdout(&output),
+        "ley.toml:2: \"alpha\": could not run: `rg` was not found on PATH\nNothing to record.\n"
+    );
+    assert_eq!(output.status.code(), Some(1));
+    // The date it had is left alone: nothing showed it to be wrong.
+    assert_eq!(
+        fs::read_to_string(history.dir.join("ley.toml")).unwrap(),
+        ledger
+    );
+}
+
 #[test]
 fn since_needs_a_git_repository() {
     if !have(&["git"]) {

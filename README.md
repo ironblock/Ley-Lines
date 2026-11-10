@@ -83,7 +83,7 @@ A ledger follows ten rules. `ley` enforces the ones a program can enforce. Each 
 7. **the same for every reader.** A command has no shell syntax and only relative paths, so it shows every reader the same thing. `rg Stage` breaks this rule: with no path, `rg` searches standard input when that is a pipe.
 8. **exact name, wide search.** A command names the thing exactly and searches as much of the place as it can. Then it still finds the thing after a file moves.
 9. **fail loud.** A row that could not be run is reported as such. It is never counted as holding, and never passed over.
-10. **earliest known.** A row may carry the earliest date, and commit, at which it is known to have held. `ley since` finds them by walking back through history. With more history, the date can move earlier.
+10. **earliest known.** A row may carry the earliest date, and commit, at which it is known to have held. `ley since` finds them by walking back through history. With more history, the date can move earlier. It moves later only when the walk finds a commit, after that date, at which the row did not hold. A shallow clone or a squashed history does not move it.
 
 ## The file
 
@@ -106,7 +106,7 @@ row = [
 | `count` | How many results the command shows. It is 1 when left out. It may be 0: the command then shows that something is not there. |
 | `since`, `sha` | The earliest known date and commit at which the row held. `ley since` writes them. |
 
-A row has `is`, or `run`, or both. What kind of row it is follows from the keys it carries.
+A row has `is`, or `run`, or both. What kind of row it is follows from the keys it carries. Each row is one line, with nothing else on it. A comment goes on a line of its own.
 
 A result is one line for `rg`, one match for `ast-grep run` and `ast-grep scan`, and one symbol for `ast-grep outline`.
 
@@ -144,6 +144,7 @@ $ ley shapes
 rg
     search text; each line printed is one result
     needs a path
+    `ley` adds: --no-config
     flags: -n --line-number -N --no-line-number -i --ignore-case -s
         --case-sensitive -S --smart-case -w --word-regexp -x --line-regexp -F
         --fixed-strings -o --only-matching -l --files-with-matches --files
@@ -152,17 +153,20 @@ rg
 
 ast-grep run
     match a code pattern; each match is one result
+    `ley` adds: --json=stream
     needs one of: -p --pattern -k --kind
     options, each with a value: -p --pattern -k --kind -l --lang --selector
         --strictness --globs
 
 ast-grep scan
     match a rule; each match is one result
+    `ley` adds: --json=stream
     needs one of: --inline-rules -r --rule
     options, each with a value: --inline-rules -r --rule --globs
 
 ast-grep outline
     list the symbols in files; each top-level symbol is one result
+    `ley` adds: --json=stream
     options, each with a value: -l --lang --items --type --match --view --globs
 
 Paths are relative and stay inside the ledger's directory.
@@ -173,7 +177,7 @@ A list of allowed programs would not be enough. `rg --pre` makes `rg` run anothe
 
 A command that fits no shape is still a valid row. Readers see it, and `ley check` reports it as "not checked". [`fixtures/commands.toml`](fixtures/commands.toml) lists commands that run and commands that are refused, each with its reason.
 
-`ley` starts each program directly, with no shell, in the ledger's directory, with nothing on standard input. A test compares how `ley` and a real `sh` split each fixture command into words. They must agree.
+`ley` starts each program directly, with no shell, in the ledger's directory, with nothing on standard input. It adds `--no-config` to `rg`, so a personal ripgrep configuration file cannot change a count or add a flag. A test compares how `ley` and a real `sh` split each fixture command into words. They must agree.
 
 Running `ley check` in a repository trusts that repository as much as running `rg` or `ast-grep` there yourself does. It does not trust it more.
 

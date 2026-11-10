@@ -1,0 +1,5 @@
+# A host and its port is not a file position, and neither is "line 2" as a name.
+row = [
+  { name = "billing proxy", is = "the proxy that listens on billing.internal:8443", said = [{ by = "maintainer", on = 2026-11-10 }] },
+  { name = "line 2", is = "the line 2 escalation team, who take over after an hour", said = [{ by = "maintainer", on = 2026-11-10 }] },
+]

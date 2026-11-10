@@ -29,7 +29,7 @@ The tests start `rg`, `ast-grep` and `git`. A test that needs a missing program 
 - **A rule.** Add its name to `RULES`. Add a file to `fixtures/invalid` that breaks only that rule. Its first line is `# breaks: <rule>`. Its second line says why, in plain words. If a reader should know the rule, add it to `ley.toml` and to the list in `README.md`. A test compares the two lists. `ley rules` prints the rows of `ley.toml` whose `is` starts with "the rule that".
 - **A flag or a shape.** Add it to `src/shapes.toml` and add a case to `fixtures/commands.toml`. Leave out any flag that writes files, runs another program, or changes what one result means.
 - **What `ley` prints.** `README.md` quotes real output, and a test compares it. Change the README in the same commit.
-- **Where something lives.** If you move or rename a thing that a row in `ley.toml` points at, `ley check` will say so. Change the row.
+- **Where something lives.** If you move or rename a thing that a row in `ley.toml` points at, `ley check` will say so. Change the row. After that commit, run `target/debug/ley since` and commit what it records.
 
 ## How to write here
 

@@ -8,6 +8,8 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 
+use crate::text::wrap;
+
 const SHAPES: &str = include_str!("shapes.toml");
 
 /// How the results of a command are counted.
@@ -32,6 +34,9 @@ pub struct Shape {
     pub counts: Counts,
     #[serde(default)]
     pub needs_path: bool,
+    /// Flags `ley` adds each time it runs the program. A row never carries them.
+    #[serde(default)]
+    pub adds: Vec<String>,
     #[serde(default)]
     pub needs_one_of: Vec<String>,
     #[serde(default)]
@@ -72,10 +77,11 @@ pub fn shapes() -> &'static [Shape] {
 /// A command that fits a shape, ready to run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
-    /// The program and its arguments, including any flag `ley` adds to count results.
+    /// What `ley` runs to count results: the row's command, and the flags `ley` adds.
     pub argv: Vec<String>,
-    /// The program and its arguments exactly as the row has them: what a reader would run.
-    pub written: Vec<String>,
+    /// What `ley` runs to see the text a reader would see, when `argv` prints
+    /// something else. `None` when `argv` already prints that text.
+    pub plain: Option<Vec<String>>,
     pub counts: Counts,
 }
 
@@ -173,15 +179,21 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
         ));
     }
 
-    let mut argv = words.to_vec();
-    if matches!(shape.counts, Counts::JsonLines | Counts::JsonItems) {
-        // Before any `--`, so it is read as a flag.
-        let at = argv.iter().position(|w| w == "--").unwrap_or(argv.len());
-        argv.insert(at, "--json=stream".into());
-    }
+    // Added flags go right after the program and its subcommand, before any `--`.
+    let mut plain = words.to_vec();
+    let at = if shape.sub.is_some() { 2 } else { 1 };
+    plain.splice(at..at, shape.adds.iter().cloned());
+    let (argv, plain) = match shape.counts {
+        Counts::Lines => (plain, None),
+        Counts::JsonLines | Counts::JsonItems => {
+            let mut argv = plain.clone();
+            argv.insert(at, "--json=stream".into());
+            (argv, Some(plain))
+        }
+    };
     Ok(Plan {
         argv,
-        written: words.to_vec(),
+        plain,
         counts: shape.counts,
     })
 }
@@ -190,6 +202,9 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
 fn inside(path: &str) -> Result<(), String> {
     if path.is_empty() {
         return Err("a path is empty".into());
+    }
+    if path == "-" {
+        return Err("`-` means standard input, which is not the same for every reader".into());
     }
     if path.starts_with('/') || path.starts_with('\\') || path.contains(':') {
         return Err(format!(
@@ -210,6 +225,13 @@ pub fn describe() -> String {
         if shape.needs_path {
             out.push_str("    needs a path\n");
         }
+        let mut adds = shape.adds.clone();
+        if matches!(shape.counts, Counts::JsonLines | Counts::JsonItems) {
+            adds.push("--json=stream".into());
+        }
+        if !adds.is_empty() {
+            out.push_str(&listed("`ley` adds:", &adds));
+        }
         if !shape.needs_one_of.is_empty() {
             out.push_str(&listed("needs one of:", &shape.needs_one_of));
         }
@@ -228,21 +250,12 @@ pub fn describe() -> String {
     out
 }
 
-/// A label, then the words, wrapped to 80 columns under a four-space indent.
 fn listed(label: &str, words: &[String]) -> String {
-    let mut out = format!("    {label}");
-    let mut width = out.len();
-    for word in words {
-        if width + 1 + word.len() > 80 {
-            out.push_str("\n       ");
-            width = 7;
-        }
-        out.push(' ');
-        out.push_str(word);
-        width += 1 + word.len();
-    }
-    out.push('\n');
-    out
+    wrap(
+        &format!("    {label}"),
+        "       ",
+        words.iter().map(String::as_str),
+    )
 }
 
 #[cfg(test)]
@@ -277,14 +290,22 @@ mod tests {
     #[test]
     fn rg_runs_as_written() {
         let plan = fit("rg -n 'interface Stage' src").unwrap();
-        assert_eq!(plan.argv, ["rg", "-n", "interface Stage", "src"]);
+        assert_eq!(
+            plan.argv,
+            ["rg", "--no-config", "-n", "interface Stage", "src"]
+        );
+        assert_eq!(plan.plain, None);
         assert_eq!(plan.counts, Counts::Lines);
     }
 
     #[test]
     fn ast_grep_gets_a_json_flag() {
         let plan = fit("ast-grep outline --type interface --match '^Stage$' src").unwrap();
-        assert_eq!(plan.argv.last().unwrap(), "--json=stream");
+        assert_eq!(plan.argv[..3], ["ast-grep", "outline", "--json=stream"]);
+        assert_eq!(
+            plan.plain.as_ref().unwrap()[..3],
+            ["ast-grep", "outline", "--type"]
+        );
         assert_eq!(plan.counts, Counts::JsonItems);
         let plan = fit("ast-grep run -p 'foo($A)' -- src").unwrap();
         assert_eq!(
@@ -292,9 +313,9 @@ mod tests {
             [
                 "ast-grep",
                 "run",
+                "--json=stream",
                 "-p",
                 "foo($A)",
-                "--json=stream",
                 "--",
                 "src"
             ]
@@ -316,6 +337,7 @@ mod tests {
             ("rg -e Stage", "needs a path"),
             ("rg", "needs a pattern"),
             ("rg Stage /etc", "is not relative"),
+            ("rg Stage -", "`-` means standard input"),
             ("rg Stage ../other", "leaves the ledger's directory"),
             ("rg Stage src/../../x", "leaves the ledger's directory"),
             ("rg -g", "`-g` needs a value"),

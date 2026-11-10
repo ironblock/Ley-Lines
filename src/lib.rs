@@ -15,3 +15,4 @@ pub mod run;
 pub mod shape;
 pub mod show;
 pub mod since;
+pub mod text;

@@ -18,6 +18,9 @@ counts = "lines"
 # With no path, rg reads standard input when that is a pipe. The same command
 # would then show different things to different readers.
 needs_path = true
+# `ley` adds this, so a personal ripgrep configuration file cannot change the count
+# or slip in a flag that is not listed here.
+adds = ["--no-config"]
 # The first word that is not a flag is the pattern, unless one of these is present.
 no_pattern_with = ["-e", "--regexp", "--files"]
 flags = [

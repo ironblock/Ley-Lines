@@ -4,7 +4,8 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use ley_lines::ledger::{self, Ledger, LoadError};
-use ley_lines::since::Found;
+use ley_lines::since::{Change, Found};
+use ley_lines::text::count;
 use ley_lines::{check, rules, run, shape, show, since};
 
 const THE_FILE: &str = "\
@@ -93,6 +94,11 @@ enum Cmd {
     /// the date and commit of the oldest commit at which it held into the
     /// ledger, as `since` and `sha`. The history is read in a temporary working
     /// tree; your own files are not touched, apart from the ledger.
+    ///
+    /// A recorded date moves earlier when more history is read. It moves later
+    /// only when the walk finds a commit, after that date, at which the row did
+    /// not hold. A shallow clone or a squashed history does not move it. A row
+    /// that does not hold at the current commit loses its date.
     Since {
         /// Print what would be recorded, and write nothing
         #[arg(long)]
@@ -138,8 +144,8 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             }
             let n = problems.len();
             println!(
-                "{n} {} in the ledger. Nothing was run.",
-                plural(n, "problem", "problems")
+                "{} in the ledger. Nothing was run.",
+                count(n as u64, "problem", "problems")
             );
             return Ok(ExitCode::FAILURE);
         }
@@ -208,63 +214,85 @@ fn show_rows(ledger: &Ledger, names: &[String]) -> ExitCode {
 }
 
 fn record_since(ledger: &Ledger, dry_run: bool) -> Result<ExitCode, String> {
-    let entries = since::since(ledger, run::LIMIT)?;
+    let walk = since::since(ledger, run::LIMIT)?;
     let file = ledger.path.display();
     let mut updates = Vec::new();
-    for entry in &entries {
+    let mut could_not_run = 0;
+    for entry in &walk.entries {
         let at = format!("{file}:{}: \"{}\"", entry.line, entry.name);
+        let recorded = ledger.rows[entry.index]
+            .pointer()
+            .and_then(|pointer| pointer.since.as_ref());
+        let change = since::decide(recorded, &entry.found, walk.shallow);
         match &entry.found {
+            Found::NotChecked(why) => println!("{at}: not checked: {why}"),
+            Found::CouldNotRun(why) => {
+                could_not_run += 1;
+                println!("{at}: could not run: {why}");
+            }
+            Found::NotNow(why) => {
+                let then = match change {
+                    Change::Removed => "the recorded date is removed",
+                    _ => "nothing recorded",
+                };
+                println!("{at}: does not hold at the current commit ({why}): {then}");
+            }
             Found::Since {
                 since,
                 commits,
-                oldest,
+                broke,
             } => {
                 let sha = since.sha.as_deref().unwrap_or("");
-                let reach = if *oldest {
-                    "the oldest commit here".to_string()
-                } else {
-                    format!(
-                        "held at {commits} {}",
-                        plural(*commits, "commit", "commits")
-                    )
+                let reach = match broke {
+                    None => "the oldest commit here".to_string(),
+                    Some(_) => format!("held at {}", count(*commits as u64, "commit", "commits")),
                 };
-                let recorded = ledger.rows[entry.index]
-                    .pointer()
-                    .and_then(|pointer| pointer.since.as_ref());
-                let change = match recorded {
-                    Some(old) if old == since => "unchanged",
-                    Some(old) if old.date > since.date => "moved earlier",
-                    Some(_) => "changed",
-                    None => "new",
-                };
-                println!(
-                    "{at}: true since at least {} (commit {sha}, {reach}): {change}",
-                    since.date
-                );
-                if change != "unchanged" {
-                    updates.push((entry.index, since.clone()));
+                let found = format!("true since at least {} (commit {sha}, {reach})", since.date);
+                match &change {
+                    Change::New(_) => println!("{at}: {found}: new"),
+                    Change::Earlier(_) => println!("{at}: {found}: moved earlier"),
+                    Change::Unchanged => println!("{at}: {found}: unchanged"),
+                    Change::Later { broke, .. } => println!(
+                        "{at}: {found}: moved later, because the row did not hold at commit {}",
+                        broke.sha
+                    ),
+                    Change::Commit(kept) => println!(
+                        "{at}: true since at least {}: the date is kept, and the commit is now {sha}, the earliest one in this history",
+                        kept.date
+                    ),
+                    Change::Kept => println!(
+                        "{at}: the recorded date is kept: this clone holds only part of the history"
+                    ),
+                    Change::Removed | Change::Nothing => {}
                 }
             }
-            Found::NotNow(why) => {
-                println!("{at}: does not hold at the current commit ({why}): nothing recorded");
-            }
-            Found::NotChecked(why) => println!("{at}: not checked: {why}"),
+        }
+        if let Some(update) = change.update() {
+            updates.push((entry.index, update));
         }
     }
     if updates.is_empty() {
         println!("Nothing to record.");
     } else if dry_run {
-        let n = updates.len();
-        println!("{n} {} would change.", plural(n, "row", "rows"));
+        println!(
+            "{} would change.",
+            count(updates.len() as u64, "row", "rows")
+        );
     } else {
         write(&ledger.path, &updates)?;
-        let n = updates.len();
-        println!("Recorded {n} {} in {file}.", plural(n, "row", "rows"));
+        println!(
+            "Recorded {} in {file}.",
+            count(updates.len() as u64, "row", "rows")
+        );
     }
-    Ok(ExitCode::SUCCESS)
+    Ok(if could_not_run == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
 
-fn write(path: &Path, updates: &[(usize, ledger::Since)]) -> Result<(), String> {
+fn write(path: &Path, updates: &[(usize, Option<ledger::Since>)]) -> Result<(), String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let text = ledger::record_since(&text, updates)?;
     // Never write a ledger that `ley` itself would refuse.
@@ -275,8 +303,4 @@ fn write(path: &Path, updates: &[(usize, ledger::Since)]) -> Result<(), String> 
         ));
     }
     std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-fn plural<'a>(n: usize, one: &'a str, many: &'a str) -> &'a str {
-    if n == 1 { one } else { many }
 }

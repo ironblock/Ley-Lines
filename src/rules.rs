@@ -3,6 +3,8 @@
 //! The rules are rows of this project's own ledger, compiled in. So the program,
 //! the ledger and the README cannot drift apart: a test compares all three.
 
+use crate::text::wrap;
+
 const OWN_LEDGER: &str = include_str!("../ley.toml");
 
 /// A row whose definition opens with these words is a rule.
@@ -29,20 +31,8 @@ pub fn describe() -> String {
         sentence.push('.');
         out.push_str(&name);
         out.push('\n');
-        let mut width = 0;
-        for word in sentence.split_whitespace() {
-            if width == 0 {
-                out.push_str("   ");
-                width = 3;
-            } else if width + 1 + word.chars().count() > 80 {
-                out.push_str("\n   ");
-                width = 3;
-            }
-            out.push(' ');
-            out.push_str(word);
-            width += 1 + word.chars().count();
-        }
-        out.push_str("\n\n");
+        out.push_str(&wrap("   ", "   ", sentence.split_whitespace()));
+        out.push('\n');
     }
     out.push_str("`ley check` enforces the rules a program can check.\n");
     out
