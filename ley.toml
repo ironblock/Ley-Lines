@@ -37,7 +37,7 @@ row = [
   { name = "no grades", is = "the rule that a ledger records who said a thing and when, and assigns no level of trust", said = [{ by = "Claude Fable 5.2", on = 2026-11-10 }] },
   { name = "no instructions", is = "the rule that a row states a fact and leaves the reader to decide whether to run anything", said = [{ by = "Claude Fable 5.2, restating Corey Vixie", on = 2026-11-10 }] },
   { name = "one row per line", is = "the rule that each row is one line of the file, so one search returns the whole row", said = [{ by = "Claude Fable 5.2", on = 2026-11-10 }] },
-  { name = "one row per line", run = "rg -l -F '# breaks: one-line' fixtures/invalid", shows = "the broken ledgers that show what this rule refuses", count = 6, since = 2026-11-10, sha = "e51337a717b4" },
+  { name = "one row per line", run = "rg -l -F '# breaks: one-line' fixtures/invalid", shows = "the broken ledgers that show what this rule refuses", count = 6, since = 2026-11-10, sha = "f1a5bb182808" },
   { name = "the same for every reader", is = "the rule that a command has no shell syntax and only relative paths, so it shows every reader the same thing", said = [{ by = "Claude Fable 5.2", on = 2026-11-10 }] },
   { name = "the same for every reader", run = "rg -n -F 'a command that would not mean the same thing' fixtures/commands.toml", shows = "where the commands refused under this rule start", since = 2026-11-10, sha = "e51337a717b4" },
   { name = "exact name, wide search", is = "the rule that a command names the thing exactly and searches as much of the place as it can, so it still finds the thing after a file moves", said = [{ by = "Claude Fable 5.2, restating Corey Vixie", on = 2026-11-10 }] },
