@@ -211,28 +211,29 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
     })
 }
 
-/// A path in a row is relative and stays inside the ledger's directory.
 /// A row's glob may only leave files out. A glob that includes files also makes the
 /// program search what git ignores and what is hidden, `.git` among it.
+///
+/// A glob can leave out every file, as `!*` does. That is not refused: no list of
+/// spellings would be complete. See "A count of zero that cannot fail" in LATER.md.
 fn leaves_out(name: &str, glob: &str, program: &str) -> Result<(), String> {
-    match glob.strip_prefix('!') {
-        // `!` alone leaves out every file. A count of zero would hold for any files.
-        Some("") => Err(format!(
-            "`{name} '!'` names no files to leave out, so it leaves out every file"
-        )),
-        Some(_) => Ok(()),
-        None if glob.is_empty() => Err(format!(
-            "`{name} ''` is an empty glob. It names no files: leave it out"
-        )),
-        None => Err(format!(
-            "`{name} {glob}` includes files. A glob that includes files also makes \
-             `{program}` search what git ignores and what is hidden, `.git` among it, \
-             and those are not the same on every machine. Name a path. \
-             `{name}` may only leave files out, as in `{name} '!*.md'`"
-        )),
+    if glob.starts_with('!') {
+        return Ok(());
     }
+    if glob.is_empty() {
+        return Err(format!(
+            "`{name} ''` is an empty glob. It names no files: leave it out"
+        ));
+    }
+    Err(format!(
+        "`{name} {glob}` includes files. A glob that includes files also makes \
+         `{program}` search what git ignores and what is hidden, `.git` among it, \
+         and those are not the same on every machine. Name a path. \
+         `{name}` may only leave files out, as in `{name} '!*.md'`"
+    ))
 }
 
+/// A path in a row is relative and stays inside the ledger's directory.
 fn inside(path: &str) -> Result<(), String> {
     if path.is_empty() {
         return Err("a path is empty".into());
@@ -334,7 +335,14 @@ mod tests {
                     shape.title()
                 );
             }
-            // An option that takes a glob is one whose glob may only leave files out.
+        }
+    }
+
+    #[test]
+    fn an_option_named_for_a_glob_may_only_leave_files_out() {
+        // This knows a glob option by its name only. One with another name has to
+        // be put in `only_excluding` by whoever adds it.
+        for shape in shapes() {
             for option in &shape.options {
                 if option == "-g" || option.contains("glob") {
                     assert!(
@@ -401,10 +409,11 @@ mod tests {
         assert!(fit("ast-grep run -p x --globs '!*.test.js' src").is_ok());
         // `ley` adds no glob of its own: it runs the search the row shows.
         for shape in shapes() {
+            let globs = ["-g", "--glob", "--globs", "--iglob"].map(String::from);
             let adds_a_glob = shape.adds.iter().any(|word| {
-                shape
-                    .only_excluding
+                globs
                     .iter()
+                    .chain(&shape.only_excluding)
                     .any(|name| word == name || word.starts_with(&format!("{name}=")))
             });
             assert!(!adds_a_glob, "{}", shape.title());
@@ -437,12 +446,7 @@ mod tests {
             ("rg -l ref -g '*' src", "`-g *` includes files"),
             // `--` is the value of `-e` here, so the flags have not ended.
             ("rg -e -- -g '*' src", "`-g *` includes files"),
-            ("rg -l ref -g '!' src", "names no files to leave out"),
             ("rg -l ref -g '' src", "is an empty glob"),
-            (
-                "ast-grep run -p x --globs '!' src",
-                "names no files to leave out",
-            ),
             (
                 "rg --files --glob=ley.toml src",
                 "`--glob ley.toml` includes files",

@@ -1303,23 +1303,27 @@ fn no_search_reaches_git_a_hidden_directory_or_what_git_ignores() {
     for dir in [".hid", "build"] {
         fs::create_dir_all(history.dir.join(dir)).unwrap();
     }
-    for file in ["src/a.js", ".hid/b.js", "build/out.js"] {
+    for file in ["src/a.js", ".dot.js", ".hid/b.js", "build/out.js"] {
         fs::write(history.dir.join(file), "needle(1);\n").unwrap();
     }
     history.commit(".gitignore", "build/\n", "2026-01-01");
     fs::write(history.dir.join(".git/extra.js"), "needle(1);\n").unwrap();
-    // Each row finds the one file that git tracks and does not hide. A glob that
-    // leaves files out, a type, a language and a rule that names files change nothing.
-    let shows = "shows = \"each call to the function, in files that git tracks and does not hide\"\ncount = 1\n";
+    // Four files hold the call, and one is planted in `.git`. No row reaches `.git`,
+    // the hidden directory or the ignored one. A type or a language also reads the
+    // hidden file that is in no hidden directory. A plain search does not.
     let rows: Vec<String> = [
-        "rg -l -F needle -g '!ley.toml' .",
-        "rg -l -F needle -t js .",
-        "ast-grep run -p 'needle($A)' .",
-        "ast-grep run -p 'needle($A)' -l js --globs '!*.md' .",
-        "ast-grep scan --inline-rules '{id: t, language: js, rule: {pattern: needle($A)}, files: [.git/**, build/**, src/**]}' .",
+        ("rg -l -F needle -g '!ley.toml' .", 1),
+        ("rg -l -F needle -t js .", 2),
+        ("ast-grep run -p 'needle($A)' .", 1),
+        ("ast-grep run -p 'needle($A)' -l js --globs '!*.md' .", 2),
+        ("ast-grep scan --inline-rules '{id: t, language: js, rule: {pattern: needle($A)}, files: [.git/**, build/**, src/**]}' .", 1),
     ]
     .iter()
-    .map(|run| format!("[[row]]\nname = \"calls\"\nrun = \"{run}\"\n{shows}"))
+    .map(|(run, count)| {
+        format!(
+            "[[row]]\nname = \"calls\"\nrun = \"{run}\"\nshows = \"each call to the function in a file the search reads\"\ncount = {count}\n"
+        )
+    })
     .collect();
     fs::write(history.dir.join("ley.toml"), rows.join("\n")).unwrap();
     assert_eq!(stdout(&ley(&history.dir, &["check"])), "5 rows: 5 hold.\n");

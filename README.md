@@ -215,7 +215,7 @@ Before it starts a program, `ley` looks at each path the row names. A path that 
 
 `ley` keeps a row out of `.git` for the same reason. A row may not name a path inside it, and a link may not lead into it. That holds in any mix of capitals: on many machines `.GIT` is `.git`.
 
-A row's glob may only leave files out, as in `-g '!*.md'`. A glob that includes files, even one as plain as `*`, makes both programs search what git ignores and what is hidden, `.git` among it. `ley` does not run such a row. It does not mend the row with a glob of its own either: it would then be checking another search than the one the row shows. A glob of `!` alone is refused too: it leaves out every file.
+A row's glob may only leave files out, as in `-g '!*.md'`. A glob that includes files, even one as plain as `*`, makes both programs search what git ignores and what is hidden, `.git` among it. `ley` does not run such a row. It does not mend the row with a glob of its own either: it would then be checking another search than the one the row shows.
 
 A type or a language names a kind of file, as `-t toml` and `-l js` do. Each also reads hidden files of that kind. Neither enters a hidden directory, `.git` among them, and neither reads what git ignores.
 

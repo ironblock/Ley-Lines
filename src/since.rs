@@ -366,21 +366,19 @@ fn history(root: &Path) -> Result<Vec<(String, Date)>, String> {
             // With no commit on any branch, there is nothing wrong: nothing is there yet.
             let none_at_all =
                 git(root, &["rev-list", "--max-count=1", "--all"]).is_ok_and(|any| any.is_empty());
+            if none_at_all {
+                return Err("the repository has no commits yet".into());
+            }
             // A new branch can have no commit while other branches have some.
             let new_branch = git(root, &["symbolic-ref", "--quiet", "HEAD"])
                 .ok()
-                .filter(|head| {
-                    git(root, &["show-ref", "--verify", "--quiet", head.trim()]).is_err()
-                });
-            return Err(match (none_at_all, new_branch) {
-                (true, _) => "the repository has no commits yet".into(),
-                (false, Some(head)) => format!(
+                .filter(|head| git(root, &["show-ref", "--verify", "--quiet", head]).is_err());
+            return Err(match new_branch {
+                Some(head) => format!(
                     "the branch `{}` has no commits yet",
-                    head.trim().trim_start_matches("refs/heads/")
+                    head.strip_prefix("refs/heads/").unwrap_or(&head)
                 ),
-                (false, None) => {
-                    format!("git could not list the commits of this repository\n{said}")
-                }
+                None => format!("git could not list the commits of this repository\n{said}"),
             });
         }
     };

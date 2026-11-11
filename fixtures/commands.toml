@@ -153,11 +153,6 @@ refused = "includes files"
 why = "Here `--` is the value of `-e`. So the flags have not ended, and the glob after it is still a glob."
 
 [[command]]
-run = "rg -l -F ref -g '!' docs"
-refused = "names no files to leave out"
-why = "`!` alone leaves out every file. A count of zero would then hold whatever the files say."
-
-[[command]]
 run = "ast-grep run -p 'foo($A)' --globs '*.js' src"
 refused = "includes files"
 why = "The same for ast-grep. `--globs '!*.test.js'` leaves files out, and that is allowed."
