@@ -15,9 +15,21 @@ The row stores the command. It never stores what the command printed. So what a 
 [`examples/pipeline`](examples/pipeline) is a small invented place: a nightly billing run with three stages, a glossary, and two package manifests. Three rows of [its ledger](examples/pipeline/ley.toml):
 
 ```toml
-{ name = "Quillon", is = "the codename for the nightly billing run", said = [{ by = "maintainer", on = 2026-11-10 }] },
-{ name = "Quillon", run = "rg -n -F Quillon docs/glossary.md", shows = "the glossary line that defines Quillon" },
-{ name = "stage", run = "rg -n -F '[stage.' pipeline.toml", shows = "the name of each stage of the billing run, in the order they run", count = 3 },
+[[row]]
+name = "Quillon"
+is = "the codename for the nightly billing run"
+said = [{ by = "maintainer", on = 2026-11-10 }]
+
+[[row]]
+name = "Quillon"
+run = "rg -n -F Quillon docs/glossary.md"
+shows = "the glossary line that defines Quillon"
+
+[[row]]
+name = "stage"
+run = "rg -n -F '[stage.' pipeline.toml"
+shows = "the name of each stage of the billing run, in the order they run"
+count = 3
 ```
 
 A reader asks what the ledger holds, then asks about one name:
@@ -55,9 +67,9 @@ Then someone removes the `publish` stage from `pipeline.toml`, and tells nobody:
 
 ```text
 $ ley check
-ley.toml:6: differs: "stage": the row says 3 results, the command showed 2
+ley.toml:20: differs: "stage": the row says 3 results, the command showed 2
     rg -n -F '[stage.' pipeline.toml
-ley.toml:8: differs: "platform": the row says 3 results, the command showed 2
+ley.toml:31: differs: "platform": the row says 3 results, the command showed 2
     rg -n '^platform' pipeline.toml
 8 rows: 4 hold, 2 differ, 2 have no command.
 ```
@@ -79,7 +91,7 @@ A ledger follows ten rules. `ley` enforces the ones a program can enforce. Each 
 3. **a command or a source.** Every sentence in a ledger is either what a command shows, or what a named source said on a date. Some facts have no command: what a codename means, why a choice was made. Those rows say who said so, and when.
 4. **no grades.** A ledger records who said a thing and when. It does not rank its sources or assign a level of trust. The reader can count the sources and weigh them. An agent is a source like any other, and is named as one.
 5. **no instructions.** A row states a fact and leaves the reader to decide whether to run anything. The author writes the parts of a row and `ley` writes the sentence, so a row cannot become "check this first".
-6. **one row per line.** One search for a name returns the whole row. One changed row is one changed line.
+6. **one field per line.** Each field of a row is on a line of its own. So a change to one field is one changed line, a review comment can sit on one field, and two people can change two fields of a row without a conflict.
 7. **the same for every reader.** A command has no shell syntax and only relative paths, so it shows every reader the same thing. `rg Stage` breaks this rule: with no path, `rg` searches standard input when that is a pipe.
 8. **exact name, wide search.** A command names the thing exactly and searches as much of the place as it can. Then it still finds the thing after a file moves.
 9. **fail loud.** A row that could not be run is reported as such. It is never counted as holding, and never passed over.
@@ -90,10 +102,15 @@ A ledger follows ten rules. `ley` enforces the ones a program can enforce. Each 
 A ledger is a TOML file named `ley.toml`. Its commands run in the directory that holds it.
 
 ```toml
-row = [
-  { name = "…", is = "…", said = [{ by = "…", on = 2026-11-10 }] },
-  { name = "…", run = "…", shows = "…" },
-]
+[[row]]
+name = "…"
+is = "…"
+said = [{ by = "…", on = 2026-11-10 }]
+
+[[row]]
+name = "…"
+run = "…"
+shows = "…"
 ```
 
 | key | what it holds |
@@ -106,7 +123,7 @@ row = [
 | `count` | How many results the command shows. It is 1 when left out. It may be 0: the command then shows that something is not there. |
 | `since`, `sha` | The earliest known date and commit at which the row held. `ley since` writes them. |
 
-A row has `is`, or `run`, or both. What kind of row it is follows from the keys it carries. Each row is one line, with nothing else on it. A comment goes on a line of its own.
+A row has `is`, or `run`, or both. What kind of row it is follows from the keys it carries. A row is a `[[row]]` block. The `=` signs may be lined up or not: `ley` does not mind, and `ley since` writes its two lines to match the block.
 
 A result is one line for `rg`, one match for `ast-grep run` and `ast-grep scan`, and one symbol for `ast-grep outline`.
 

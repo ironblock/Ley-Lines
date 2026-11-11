@@ -9,10 +9,18 @@ use ley_lines::text::count;
 use ley_lines::{check, rules, run, shape, show, since};
 
 const THE_FILE: &str = "\
-A row is one line of ley.toml, inside `row = [ … ]`:
+A row is a block of ley.toml, with one field on each line:
 
-  { name = \"…\", is = \"…\", said = [{ by = \"…\", on = 2026-11-10 }] },
-  { name = \"…\", run = \"…\", shows = \"…\", count = 3 },
+  [[row]]
+  name = \"…\"
+  is = \"…\"
+  said = [{ by = \"…\", on = 2026-11-10 }]
+
+  [[row]]
+  name = \"…\"
+  run = \"…\"
+  shows = \"…\"
+  count = 3
 
   name    the term a reader would look up
   is      what the thing is; it needs `said`
@@ -28,7 +36,7 @@ A row has `is`, or `run`, or both. `ley rules` prints the rules a ledger follows
 
 /// A ledger of facts about one place, each with a command that shows it.
 ///
-/// The ledger is a file named ley.toml. Each line of it is one row. A row says
+/// The ledger is a file named ley.toml, made of rows. A row says
 /// what a thing is and who said so, or it gives a command: "If you run X, it
 /// will show you Y." The row stores the command and never its output, so a
 /// reader sees the place as it is now. `ley check` runs the commands and

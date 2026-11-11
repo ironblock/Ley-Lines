@@ -1,6 +1,6 @@
 //! The ledger: a TOML file of rows, and the rules a row must follow.
 //!
-//! On disk a row is one line: a flat table whose keys are all optional but `name`.
+//! On disk a row is a `[[row]]` block, one field on each line. Every key is optional but `name`.
 //! In memory a row is a sum type, so a row that says nothing cannot exist past
 //! `parse`. What kind of row it is follows from the keys it carries. It is never
 //! declared.
@@ -22,7 +22,7 @@ pub const KEYS: [&str; 8] = [
 pub const RULES: [&str; 13] = [
     "toml",
     "top-level",
-    "one-line",
+    "layout",
     "unknown-key",
     "type",
     "name",
@@ -206,7 +206,7 @@ pub fn parse(text: &str) -> Result<Vec<Row>, Vec<Problem>> {
             problems.push(Problem::new(
                 line,
                 "top-level",
-                "`row` is a list of rows: `row = [` on one line, then one row per line, then `]`",
+                "rows are `[[row]]` blocks: a line `[[row]]`, then one field on each line",
             ));
         }
     }
@@ -221,17 +221,19 @@ pub fn parse(text: &str) -> Result<Vec<Row>, Vec<Problem>> {
 }
 
 struct Layout {
-    /// The line the list of rows starts on.
+    /// The line the first row starts on.
     opener: usize,
-    /// The line of each row, in order.
+    /// The line each row starts on, in order.
     rows: Vec<usize>,
 }
 
-/// Check that every row is one whole line, and note which line each row is on.
+/// Check that rows are written as blocks, and note which line each row starts on.
 ///
-/// One row per line means one search for a name returns the whole row, and one
-/// changed row is one changed line. The positions come from the TOML parser's own
-/// record of where each value sits, so this cannot disagree with the parser.
+/// A row is a `[[row]]` block with one field on each line. Then a change to one
+/// field is one changed line, a review comment can sit on one field, and two
+/// people can change two fields of a row without a conflict. TOML itself puts each
+/// field of a block on its own line. The other way to write a list of tables, all
+/// of a row's fields on one line, is refused. The positions come from the parser.
 fn layout(text: &str, problems: &mut Vec<Problem>) -> Layout {
     let mut found = Layout {
         opener: 1,
@@ -244,51 +246,19 @@ fn layout(text: &str, problems: &mut Vec<Problem>) -> Layout {
         return found;
     };
     if let Some(blocks) = item.as_array_of_tables() {
-        found.opener = blocks.span().map_or(1, |span| line_at(text, span.start));
-        problems.push(Problem::new(
-            found.opener,
-            "one-line",
-            "write rows as lines inside `row = [ … ]`, not as `[[row]]` blocks: \
-             then one search returns the whole row",
-        ));
-        return found;
-    }
-    let Some(array) = item.as_array() else {
-        return found;
-    };
-    if let Some(span) = array.span() {
-        found.opener = line_at(text, span.start);
-    }
-    let lines: Vec<&str> = text.lines().collect();
-    for value in array.iter() {
-        let Some(span) = value.span() else {
-            found.rows.push(found.opener);
-            continue;
-        };
-        let first = line_at(text, span.start);
-        let last = line_at(text, span.end.max(span.start + 1) - 1);
-        found.rows.push(first);
-        if first != last {
-            problems.push(Problem::new(
-                first,
-                "one-line",
-                format!(
-                    "this row is spread over lines {first} to {last}: write each row on \
-                     one line, so that one search returns the whole row"
-                ),
-            ));
-            continue;
+        for block in blocks.iter() {
+            let line = block.span().map_or(1, |span| line_at(text, span.start));
+            found.rows.push(line);
         }
-        let on_the_line = lines
-            .get(first - 1)
-            .map_or("", |line| line.trim_start_matches('\u{feff}').trim());
-        let row = &text[span];
-        if on_the_line != row && on_the_line.strip_suffix(',') != Some(row) {
+        found.opener = found.rows.first().copied().unwrap_or(1);
+    } else if let Some(array) = item.as_array() {
+        found.opener = array.span().map_or(1, |span| line_at(text, span.start));
+        if !array.is_empty() {
             problems.push(Problem::new(
-                first,
-                "one-line",
-                "a row shares this line with something else: put each row on a line \
-                 of its own, as `{ … },`",
+                found.opener,
+                "layout",
+                "write each row as a `[[row]]` block, with one field on each line: \
+                 then a change to one field is one changed line",
             ));
         }
     }
@@ -301,7 +271,7 @@ fn row(value: &Value, line: usize, problems: &mut Vec<Problem>) -> Option<Row> {
         problems.push(Problem::new(
             line,
             "type",
-            "a row is a table on one line: `{ name = \"…\", … },`",
+            "a row is a `[[row]]` block, with one field on each line",
         ));
         return None;
     };
@@ -669,27 +639,31 @@ fn line_starting_with(text: &str, key: &str) -> Option<usize> {
 /// Record `since` and `sha` on rows, or remove them, changing nothing else in the file.
 ///
 /// `updates` holds the position of each row in the ledger, and what to record.
-/// `None` removes both keys. Only the bytes of those two keys change: the spacing of
-/// the row, the other rows, the comments and a byte-order mark all stay as they were.
+/// `None` removes both keys. Only those two lines of a block change: every other
+/// line, the comments and a byte-order mark stay as they were. A new line is
+/// written the way the block's other fields are, lined up or not.
 pub fn record_since(text: &str, updates: &[(usize, Option<Since>)]) -> Result<String, String> {
+    use std::ops::Range;
+
     let document = toml_edit::Document::parse(text)
         .map_err(|e| format!("the ledger is not valid TOML: {e}"))?;
     let rows = document
         .as_table()
         .get("row")
-        .and_then(|item| item.as_array())
-        .ok_or("the ledger has no `row` list")?;
+        .and_then(|item| item.as_array_of_tables())
+        .ok_or("the ledger has no `[[row]]` blocks")?;
+    let line_start = |at: usize| text[..at].rfind('\n').map_or(0, |i| i + 1);
+    let line_end = |at: usize| text[at..].find('\n').map_or(text.len(), |i| at + i);
 
     // Each edit replaces one span of the text.
-    let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+    let mut edits: Vec<(Range<usize>, String)> = Vec::new();
     for (index, since) in updates {
         let row = rows
             .get(*index)
-            .and_then(|value| value.as_inline_table())
-            .ok_or_else(|| format!("row {} is not a table on one line", index + 1))?;
-        // The keys of the row in the order they are written, with where each key
+            .ok_or_else(|| format!("the ledger has no row {}", index + 1))?;
+        // The fields of the block in the order they are written, with where each key
         // and each value sits in the text.
-        let mut entries = Vec::new();
+        let mut entries: Vec<(&str, Range<usize>, Range<usize>)> = Vec::new();
         for (name, _) in row.iter() {
             let spans = row
                 .get_key_value(name)
@@ -698,11 +672,10 @@ pub fn record_since(text: &str, updates: &[(usize, Option<Since>)]) -> Result<St
             entries.push((name, key, value));
         }
         let place = |name: &str| entries.iter().position(|(key, _, _)| *key == name);
-        // A key goes together with the comma before it; the first key, with the comma after.
-        let without = |i: usize| match i {
-            0 if entries.len() > 1 => entries[0].1.start..entries[1].1.start,
-            0 => entries[0].1.start..entries[0].2.end,
-            _ => entries[i - 1].2.end..entries[i].2.end,
+        // A field's whole line, with the line break after it.
+        let whole_line = |i: usize| {
+            let end = line_end(entries[i].2.end);
+            line_start(entries[i].1.start)..(end + 1).min(text.len())
         };
         match since {
             Some(since) => {
@@ -710,26 +683,51 @@ pub fn record_since(text: &str, updates: &[(usize, Option<Since>)]) -> Result<St
                 let date = since.date.to_string();
                 match place("since") {
                     Some(i) => edits.push((entries[i].2.clone(), date)),
-                    None => added.push(format!("since = {date}")),
+                    None => added.push(("since", date)),
                 }
                 match (&since.sha, place("sha")) {
                     (Some(sha), Some(i)) => {
-                        edits.push((entries[i].2.clone(), format!("\"{sha}\"")))
+                        edits.push((entries[i].2.clone(), format!("\"{sha}\"")));
                     }
-                    (Some(sha), None) => added.push(format!("sha = \"{sha}\"")),
-                    (None, Some(i)) => edits.push((without(i), String::new())),
+                    (Some(sha), None) => added.push(("sha", format!("\"{sha}\""))),
+                    (None, Some(i)) => edits.push((whole_line(i), String::new())),
                     (None, None) => {}
                 }
                 if !added.is_empty() {
-                    let end = entries.iter().map(|(_, _, value)| value.end).max();
-                    let end = end.ok_or("a row has no keys")?;
-                    edits.push((end..end, format!(", {}", added.join(", "))));
+                    let last = entries.iter().map(|(_, _, value)| value.end).max();
+                    let at = line_end(last.ok_or("a row has no fields")?);
+                    // Write the new lines the way the block writes its fields: the same
+                    // indent, and the same column for `=` when the block lines them up.
+                    let first = &entries[0];
+                    let indent = &text[line_start(first.1.start)..first.1.start];
+                    let column = |(_, key, value): &(&str, Range<usize>, Range<usize>)| {
+                        let equals = text[key.end..value.start].find('=')? + key.end;
+                        Some(equals - line_start(key.start))
+                    };
+                    let lined_up = match column(first) {
+                        Some(c)
+                            if entries.len() > 1
+                                && entries.iter().all(|e| column(e) == Some(c)) =>
+                        {
+                            Some(c)
+                        }
+                        _ => None,
+                    };
+                    let mut lines = String::new();
+                    for (name, value) in added {
+                        let width = lined_up.map_or(0, |c| c.saturating_sub(indent.len()));
+                        match width > name.len() {
+                            true => lines.push_str(&format!("\n{indent}{name:<width$}= {value}")),
+                            false => lines.push_str(&format!("\n{indent}{name} = {value}")),
+                        }
+                    }
+                    edits.push((at..at, lines));
                 }
             }
             None => {
                 for name in ["since", "sha"] {
                     if let Some(i) = place(name) {
-                        edits.push((without(i), String::new()));
+                        edits.push((whole_line(i), String::new()));
                     }
                 }
             }
@@ -778,54 +776,67 @@ mod tests {
     #[test]
     fn a_row_takes_its_line_from_the_parser() {
         // A byte-order mark, a comment, and a blank line do not shift the count.
-        let text = "\u{feff}# first\nrow = [\n\n  { name = \"a\" },\n]\n";
+        let text = "\u{feff}# first\n\n[[row]]\nname = \"a\"\n";
         let problems = parse(text).unwrap_err();
-        assert_eq!((problems[0].line, problems[0].rule), (4, "empty-row"));
+        assert_eq!((problems[0].line, problems[0].rule), (3, "empty-row"));
+    }
+
+    const TWO_ROWS: &str = "# a ledger\n[[row]]\nname = \"a\"\nrun = \"rg x src\"\nshows = \"x\"\n\n# kept\n[[row]]\nname  = \"b\"\nis    = \"lined up\"\nsaid  = [{ by = \"m\", on = 2026-11-10 }]\n";
+
+    fn since(date: &str, sha: &str) -> Since {
+        Since {
+            date: date.parse::<Datetime>().unwrap().date.unwrap(),
+            sha: Some(sha.into()),
+        }
     }
 
     #[test]
-    fn recording_since_changes_only_that_row() {
-        let text = "# a ledger\nrow = [\n  { name = \"a\", run = \"rg x src\", shows = \"x\" },\n\n  # kept\n  { name = \"b\",   is = \"spaced\",  said = [{ by = \"m\", on = 2026-11-10 }] },\n]\n";
-        let since = Since {
-            date: "2026-11-09".parse::<Datetime>().unwrap().date.unwrap(),
-            sha: Some("0123456789ab".into()),
-        };
-        let out = record_since(text, &[(0, Some(since.clone()))]).unwrap();
-        let expected = text.replace(
-            "shows = \"x\" }",
-            "shows = \"x\", since = 2026-11-09, sha = \"0123456789ab\" }",
+    fn recording_since_adds_two_lines_and_changes_nothing_else() {
+        let first = [(0, Some(since("2026-11-09", "0123456789ab")))];
+        let out = record_since(TWO_ROWS, &first).unwrap();
+        let expected = TWO_ROWS.replace(
+            "shows = \"x\"\n",
+            "shows = \"x\"\nsince = 2026-11-09\nsha = \"0123456789ab\"\n",
         );
         assert_eq!(out, expected);
         // Recording the same thing again changes nothing.
-        assert_eq!(record_since(&out, &[(0, Some(since))]).unwrap(), out);
+        assert_eq!(record_since(&out, &first).unwrap(), out);
         assert!(parse(&out).is_ok());
+        // A later date and another commit replace only those two values.
+        let later = [(0, Some(since("2026-12-01", "ba9876543210")))];
+        let moved = record_since(&out, &later).unwrap();
+        let expected = out
+            .replace("2026-11-09", "2026-12-01")
+            .replace("0123456789ab", "ba9876543210");
+        assert_eq!(moved, expected);
         // Removing it gives the first file back.
-        assert_eq!(record_since(&out, &[(0, None)]).unwrap(), text);
+        assert_eq!(record_since(&moved, &[(0, None)]).unwrap(), TWO_ROWS);
     }
 
     #[test]
-    fn recording_since_keeps_the_spacing_of_the_row_and_a_byte_order_mark() {
-        let text = "\u{feff}row = [\n  {name=\"a\",   run = \"rg x src\",shows = \"x\"},\n]\n";
-        let since = Since {
-            date: "2026-11-09".parse::<Datetime>().unwrap().date.unwrap(),
-            sha: Some("0123456789ab".into()),
-        };
-        let out = record_since(text, &[(0, Some(since))]).unwrap();
-        assert_eq!(
-            out,
-            "\u{feff}row = [\n  {name=\"a\",   run = \"rg x src\",shows = \"x\", since = 2026-11-09, sha = \"0123456789ab\"},\n]\n"
+    fn recording_since_follows_the_way_a_block_is_written() {
+        // The second block lines up its `=` signs. A byte-order mark stays.
+        let lined_up = TWO_ROWS.replace(
+            "is    = \"lined up\"\nsaid  = [{ by = \"m\", on = 2026-11-10 }]",
+            "run   = \"rg y src\"\nshows = \"y\"",
         );
-        // A later date and another commit replace only those two values.
-        let later = Since {
-            date: "2026-12-01".parse::<Datetime>().unwrap().date.unwrap(),
-            sha: Some("ba9876543210".into()),
-        };
-        let moved = record_since(&out, &[(0, Some(later))]).unwrap();
-        assert_eq!(
-            moved,
-            out.replace("2026-11-09", "2026-12-01")
-                .replace("0123456789ab", "ba9876543210")
+        let text = format!("\u{feff}{lined_up}");
+        let update = [(1, Some(since("2026-11-09", "0123456789ab")))];
+        let out = record_since(&text, &update).unwrap();
+        assert!(out.starts_with('\u{feff}'));
+        assert!(
+            out.ends_with("shows = \"y\"\nsince = 2026-11-09\nsha   = \"0123456789ab\"\n"),
+            "{out}"
         );
-        assert_eq!(record_since(&moved, &[(0, None)]).unwrap(), text);
+        assert_eq!(record_since(&out, &[(1, None)]).unwrap(), text);
+    }
+
+    #[test]
+    fn rows_written_on_one_line_are_refused() {
+        let text = "row = [\n  { name = \"a\", run = \"rg x src\", shows = \"x\" },\n]\n";
+        let problems = parse(text).unwrap_err();
+        assert_eq!((problems[0].line, problems[0].rule), (1, "layout"));
+        // A list with nothing in it is a ledger with no rows.
+        assert!(parse("row = []\n").unwrap().is_empty());
     }
 }

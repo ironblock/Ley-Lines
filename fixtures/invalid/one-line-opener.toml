@@ -1,3 +1,0 @@
-# breaks: one-line
-# The whole list is on one line.
-row = [{ name = "a", run = "rg -n a src", shows = "the lines with a" }]

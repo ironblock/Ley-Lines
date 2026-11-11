@@ -1,5 +1,5 @@
 # breaks: shows
 # A command with no `shows` cannot be written as "if you run X, it will show you Y".
-row = [
-  { name = "Stage", run = "rg -n Stage services" },
-]
+[[row]]
+name = "Stage"
+run = "rg -n Stage services"

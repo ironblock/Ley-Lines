@@ -1,5 +1,7 @@
 # breaks: source
 # The sources have nothing to vouch for. What a command shows needs no source.
-row = [
-  { name = "Stage", run = "rg -n Stage services", shows = "the lines that mention Stage", said = [{ by = "maintainer", on = 2026-11-10 }] },
-]
+[[row]]
+name = "Stage"
+said = [{ by = "maintainer", on = 2026-11-10 }]
+run = "rg -n Stage services"
+shows = "the lines that mention Stage"

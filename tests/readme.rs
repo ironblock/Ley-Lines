@@ -106,18 +106,18 @@ fn rows_quoted_in_the_readme_are_rows_of_a_real_ledger() {
     let ledgers = ["ley.toml", "examples/pipeline/ley.toml"]
         .map(|path| fs::read_to_string(repository().join(path)).unwrap())
         .join("\n");
-    let real: BTreeSet<&str> = ledgers.lines().map(str::trim).collect();
     let mut quoted = 0;
     for block in blocks(&readme(), "toml") {
-        for line in &block {
-            let line = line.trim();
-            // A line with an ellipsis is a sketch of the format, not a row.
-            if !line.starts_with("{ name = ") || line.contains('…') {
+        for row in block.join("\n").split("[[row]]") {
+            let row = row.trim();
+            // A row with an ellipsis is a sketch of the format, not a row.
+            if row.is_empty() || row.contains('…') {
                 continue;
             }
+            let whole = format!("[[row]]\n{row}\n");
             assert!(
-                real.contains(line),
-                "README.md quotes a row no ledger has:\n{line}"
+                ledgers.contains(&whole),
+                "README.md quotes a row no ledger has:\n{whole}"
             );
             quoted += 1;
         }

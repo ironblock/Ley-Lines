@@ -1,5 +1,0 @@
-# breaks: one-line
-# Two rows share a line.
-row = [
-  { name = "a", run = "rg -n a src", shows = "the lines with a" }, { name = "b", run = "rg -n b src", shows = "the lines with b" },
-]

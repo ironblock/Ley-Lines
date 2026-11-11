@@ -89,20 +89,20 @@ fn every_rule_has_a_fixture_that_breaks_it() {
 }
 
 #[test]
-fn a_problem_names_the_line_of_its_row() {
-    let text = "row = [\n  { name = \"a\", run = \"rg a src\", shows = \"a\" },\n\n  # a comment\n  { name = \"b\" },\n]\n";
+fn a_problem_names_the_line_its_row_starts_on() {
+    let text = "[[row]]\nname = \"a\"\nrun = \"rg a src\"\nshows = \"a\"\n\n# a comment\n[[row]]\nname = \"b\"\n";
     let problems = ledger::parse(text).unwrap_err();
     assert_eq!(problems.len(), 1);
-    assert_eq!(problems[0].line, 5);
+    assert_eq!(problems[0].line, 7);
     assert_eq!(problems[0].rule, "empty-row");
 }
 
 #[test]
 fn every_problem_in_a_ledger_is_reported_at_once() {
-    let text = "row = [\n  { name = \"a\" },\n  { name = \"b\", run = \"rg b src\" },\n  { nam = \"c\" },\n]\n";
+    let text = "[[row]]\nname = \"a\"\n\n[[row]]\nname = \"b\"\nrun = \"rg b src\"\n\n[[row]]\nnam = \"c\"\n";
     let problems = ledger::parse(text).unwrap_err();
     let lines: Vec<usize> = problems.iter().map(|p| p.line).collect();
-    assert_eq!(lines, [2, 3, 4, 4, 4]);
+    assert_eq!(lines, [1, 4, 8, 8, 8]);
 }
 
 #[derive(serde::Deserialize)]

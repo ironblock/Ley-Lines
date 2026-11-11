@@ -115,9 +115,9 @@ fn a_changed_place_is_reported() {
     assert_eq!(output.status.code(), Some(1));
     let printed = stdout(&output);
     let expected = "\
-ley.toml:6: differs: \"stage\": the row says 3 results, the command showed 2
+ley.toml:20: differs: \"stage\": the row says 3 results, the command showed 2
     rg -n -F '[stage.' pipeline.toml
-ley.toml:8: differs: \"platform\": the row says 3 results, the command showed 2
+ley.toml:31: differs: \"platform\": the row says 3 results, the command showed 2
     rg -n '^platform' pipeline.toml
 8 rows: 4 hold, 2 differ, 2 have no command.
 ";
@@ -160,11 +160,9 @@ fn a_row_that_repeats_what_its_command_printed_is_reported() {
     let (_holder, dir) = example();
     let ledger = dir.join("ley.toml");
     let text = fs::read_to_string(&ledger).unwrap();
-    let added = text.replace(
-        "\n]\n",
-        "\n  { name = \"Larkspur\", run = \"rg -n -F Larkspur docs/glossary.md\", shows = \"the glossary line that defines Larkspur as the streaming platform\", count = 1 },\n  { name = \"extensions\", run = \"rg -n -F packageManager extensions/package.json\", shows = \"the package manager the extensions directory declares: npm@10.8.0\", count = 1 },\n]\n",
+    let added = format!(
+        "{text}\n[[row]]\nname = \"Larkspur\"\nrun = \"rg -n -F Larkspur docs/glossary.md\"\nshows = \"the glossary line that defines Larkspur as the streaming platform\"\n\n[[row]]\nname = \"extensions\"\nrun = \"rg -n -F packageManager extensions/package.json\"\nshows = \"the package manager the extensions directory declares: npm@10.8.0\"\n"
     );
-    assert_ne!(text, added);
     fs::write(&ledger, added).unwrap();
 
     let output = ley(&dir, &["check"]);
@@ -172,13 +170,13 @@ fn a_row_that_repeats_what_its_command_printed_is_reported() {
     let printed = stdout(&output);
     assert!(
         printed.contains(
-            "ley.toml:11: restates: \"Larkspur\": `shows` repeats `streaming platform`, which the command printed."
+            "restates: \"Larkspur\": `shows` repeats `streaming platform`, which the command printed."
         ),
         "{printed}"
     );
     assert!(
         printed.contains(
-            "ley.toml:12: restates: \"extensions\": `shows` repeats `npm@10.8.0`, which the command printed."
+            "restates: \"extensions\": `shows` repeats `npm@10.8.0`, which the command printed."
         ),
         "{printed}"
     );
@@ -259,7 +257,7 @@ fn a_ledger_that_breaks_a_rule_runs_nothing() {
         let output = ley(&dir, &["--ledger", "source-missing.toml", command]);
         assert_eq!(output.status.code(), Some(1));
         let printed = stdout(&output);
-        assert!(printed.starts_with("source-missing.toml:4: \"Quillon\": `is` needs `said`"));
+        assert!(printed.starts_with("source-missing.toml:3: \"Quillon\": `is` needs `said`"));
         assert!(printed.ends_with("1 problem in the ledger. Nothing was run.\n"));
     }
 }
@@ -336,12 +334,25 @@ impl History {
 }
 
 const HISTORY_LEDGER: &str = "\
-row = [
-  { name = \"alpha\", run = \"rg -n -F alpha src\", shows = \"the line with alpha\" },
-  { name = \"beta\", run = \"rg -n -F beta src\", shows = \"the line with beta\" },
-  { name = \"gamma\", run = \"rg -n -F gamma src\", shows = \"the line with gamma\" },
-  { name = \"delta\", is = \"a word with no command\", said = [{ by = \"maintainer\", on = 2026-11-10 }] },
-]
+[[row]]
+name = \"alpha\"
+run = \"rg -n -F alpha src\"
+shows = \"the line with alpha\"
+
+[[row]]
+name = \"beta\"
+run = \"rg -n -F beta src\"
+shows = \"the line with beta\"
+
+[[row]]
+name = \"gamma\"
+run = \"rg -n -F gamma src\"
+shows = \"the line with gamma\"
+
+[[row]]
+name = \"delta\"
+is = \"a word with no command\"
+said = [{ by = \"maintainer\", on = 2026-11-10 }]
 ";
 
 #[test]
@@ -367,24 +378,24 @@ fn since_walks_back_through_history_and_does_not_bisect() {
     let (first, again) = (&first[..12], &again[..12]);
     let expected = format!(
         "\
-ley.toml:2: \"alpha\": true since at least 2026-01-01 (commit {first}, the oldest commit here): new
-ley.toml:3: \"beta\": true since at least 2026-04-01 (commit {again}, held at 2 commits): new
-ley.toml:4: \"gamma\": does not hold at the current commit (the command showed 0): nothing recorded
+ley.toml:1: \"alpha\": true since at least 2026-01-01 (commit {first}, the oldest commit here): new
+ley.toml:6: \"beta\": true since at least 2026-04-01 (commit {again}, held at 2 commits): new
+ley.toml:11: \"gamma\": does not hold at the current commit (the command showed 0): nothing recorded
 Recorded 2 rows in ley.toml.
 "
     );
     assert_eq!(printed, expected);
 
-    // The ledger now carries the dates, and nothing else in it changed.
+    // The ledger now carries the dates, as two new lines in each block. Nothing else changed.
     let text = fs::read_to_string(history.dir.join("ley.toml")).unwrap();
     let expected = HISTORY_LEDGER
         .replace(
-            "shows = \"the line with alpha\" }",
-            &format!("shows = \"the line with alpha\", since = 2026-01-01, sha = \"{first}\" }}"),
+            "shows = \"the line with alpha\"\n",
+            &format!("shows = \"the line with alpha\"\nsince = 2026-01-01\nsha = \"{first}\"\n"),
         )
         .replace(
-            "shows = \"the line with beta\" }",
-            &format!("shows = \"the line with beta\", since = 2026-04-01, sha = \"{again}\" }}"),
+            "shows = \"the line with beta\"\n",
+            &format!("shows = \"the line with beta\"\nsince = 2026-04-01\nsha = \"{again}\"\n"),
         );
     assert_eq!(text, expected);
     let rows = ledger::parse(&text).unwrap();
@@ -414,9 +425,9 @@ Recorded 2 rows in ley.toml.
     assert_eq!(history.git(&["status", "--porcelain"], ""), "M ley.toml");
 }
 
-/// A ledger with one row, for the tests below.
-fn one_row(dir: &Path, row: &str) {
-    fs::write(dir.join("ley.toml"), format!("row = [\n  {row}\n]\n")).unwrap();
+/// A ledger with one row, for the tests below. `fields` is the row's lines.
+fn one_row(dir: &Path, fields: &str) {
+    fs::write(dir.join("ley.toml"), format!("[[row]]\n{fields}\n")).unwrap();
 }
 
 // The next tests each come from a review of this program. Every case was reproduced
@@ -431,12 +442,18 @@ fn a_rule_whose_severity_is_error_is_counted_and_not_failed() {
     // ast-grep then ends with "Error: 1 error(s) found in code." That is a count of matches.
     one_row(
         &dir,
-        r#"{ name = "interface", run = "ast-grep scan --inline-rules '{id: r, language: ts, severity: error, rule: {kind: interface_declaration}}' services", shows = "each interface under services" },"#,
+        r#"name = "interface"
+run = "ast-grep scan --inline-rules '{id: r, language: ts, severity: error, rule: {kind: interface_declaration}}' services"
+shows = "each interface under services""#,
     );
     let output = ley(&dir, &["check"]);
     assert_eq!(stdout(&output), "1 row: 1 holds.\n");
     assert!(output.status.success());
 }
+
+const QUILLON: &str = r#"name = "Quillon"
+run = "rg -n -F Quillon docs/glossary.md"
+shows = "the glossary line that defines Quillon""#;
 
 #[test]
 fn a_personal_ripgrep_configuration_changes_nothing() {
@@ -446,10 +463,7 @@ fn a_personal_ripgrep_configuration_changes_nothing() {
     let (holder, dir) = example();
     let config = holder.path().join("ripgreprc");
     fs::write(&config, "--context=1\n--smart-case\n").unwrap();
-    one_row(
-        &dir,
-        r#"{ name = "Quillon", run = "rg -n -F Quillon docs/glossary.md", shows = "the glossary line that defines Quillon" },"#,
-    );
+    one_row(&dir, QUILLON);
     let output = Command::new(LEY)
         .arg("check")
         .current_dir(&dir)
@@ -468,7 +482,7 @@ fn an_empty_line_that_rg_prints_is_a_result() {
     fs::write(dir.join("blanks.txt"), "\n\n\n").unwrap();
     one_row(
         &dir,
-        r#"{ name = "blank", run = "rg -x '' blanks.txt", shows = "each empty line of the file", count = 3 },"#,
+        "name = \"blank\"\nrun = \"rg -x '' blanks.txt\"\nshows = \"each empty line of the file\"\ncount = 3",
     );
     assert_eq!(stdout(&ley(&dir, &["check"])), "1 row: 1 holds.\n");
 }
@@ -478,7 +492,7 @@ fn show_lists_a_name_once_whatever_its_capitals() {
     let holder = tempfile::tempdir().unwrap();
     fs::write(
         holder.path().join("ley.toml"),
-        "row = [\n  { name = \"Stage\", run = \"rg -n a src\", shows = \"a\" },\n  { name = \"stage\", run = \"rg -n b src\", shows = \"b\" },\n]\n",
+        "[[row]]\nname = \"Stage\"\nrun = \"rg -n a src\"\nshows = \"a\"\n\n[[row]]\nname = \"stage\"\nrun = \"rg -n b src\"\nshows = \"b\"\n",
     )
     .unwrap();
     assert_eq!(
@@ -487,8 +501,17 @@ fn show_lists_a_name_once_whatever_its_capitals() {
     );
 }
 
-const ALPHA_ROW: &str =
-    "{ name = \"alpha\", run = \"rg -n -F alpha src\", shows = \"the line with alpha\" },";
+/// A ledger with one row about `alpha`, and any further lines the row carries.
+fn alpha_ledger(more: &str) -> String {
+    format!(
+        "[[row]]\nname = \"alpha\"\nrun = \"rg -n -F alpha src\"\nshows = \"the line with alpha\"\n{more}"
+    )
+}
+
+/// The two lines `ley since` writes.
+fn recorded(date: &str, commit: &str) -> String {
+    format!("since = {date}\nsha = \"{}\"\n", &commit[..12])
+}
 
 #[test]
 fn since_keeps_a_recorded_date_in_a_shallow_clone() {
@@ -496,16 +519,12 @@ fn since_keeps_a_recorded_date_in_a_shallow_clone() {
         return;
     }
     let history = History::new();
-    history.commit("src/words.txt", "alpha\n", "2026-01-01");
-    history.commit(
-        "ley.toml",
-        &format!("row = [\n  {ALPHA_ROW}\n]\n"),
-        "2026-02-01",
-    );
+    let first = history.commit("src/words.txt", "alpha\n", "2026-01-01");
+    history.commit("ley.toml", &alpha_ledger(""), "2026-02-01");
     assert!(ley(&history.dir, &["since"]).status.success());
-    let recorded = fs::read_to_string(history.dir.join("ley.toml")).unwrap();
-    assert!(recorded.contains("since = 2026-01-01"), "{recorded}");
-    history.commit("ley.toml", &recorded, "2026-03-01");
+    let text = fs::read_to_string(history.dir.join("ley.toml")).unwrap();
+    assert_eq!(text, alpha_ledger(&recorded("2026-01-01", &first)));
+    history.commit("ley.toml", &text, "2026-03-01");
 
     // A clone with one commit sees the row hold from 2026-03-01. That is no reason
     // to say the fact is newer than it is.
@@ -522,15 +541,11 @@ fn since_keeps_a_recorded_date_in_a_shallow_clone() {
         String::from_utf8_lossy(&cloned.stderr)
     );
     let output = ley(&shallow, &["since"]);
-    let printed = stdout(&output);
     assert_eq!(
-        printed,
-        "ley.toml:2: \"alpha\": the recorded date is kept: this clone holds only part of the history\nNothing to record.\n"
+        stdout(&output),
+        "ley.toml:1: \"alpha\": the recorded date is kept: this clone holds only part of the history\nNothing to record.\n"
     );
-    assert_eq!(
-        fs::read_to_string(shallow.join("ley.toml")).unwrap(),
-        recorded
-    );
+    assert_eq!(fs::read_to_string(shallow.join("ley.toml")).unwrap(), text);
 }
 
 #[test]
@@ -540,29 +555,23 @@ fn since_moves_a_date_later_only_past_a_commit_where_the_row_broke() {
     }
     let history = History::new();
     history.commit("src/words.txt", "beta\n", "2026-01-01");
-    let recorded = history.commit("src/words.txt", "alpha\nbeta\n", "2026-02-01");
+    let was = history.commit("src/words.txt", "alpha\nbeta\n", "2026-02-01");
     let broke = history.commit("src/words.txt", "beta\n", "2026-03-01");
     let again = history.commit("src/words.txt", "alpha\nbeta\n", "2026-04-01");
-    let row = ALPHA_ROW.replace(
-        " },",
-        &format!(", since = 2026-02-01, sha = \"{}\" }},", &recorded[..12]),
-    );
-    history.commit("ley.toml", &format!("row = [\n  {row}\n]\n"), "2026-05-01");
+    let ledger = alpha_ledger(&recorded("2026-02-01", &was));
+    history.commit("ley.toml", &ledger, "2026-05-01");
 
     let printed = stdout(&ley(&history.dir, &["since"]));
     assert_eq!(
         printed,
         format!(
-            "ley.toml:2: \"alpha\": true since at least 2026-04-01 (commit {}, held at 2 commits): moved later, because the row did not hold at commit {}\nRecorded 1 row in ley.toml.\n",
+            "ley.toml:1: \"alpha\": true since at least 2026-04-01 (commit {}, held at 2 commits): moved later, because the row did not hold at commit {}\nRecorded 1 row in ley.toml.\n",
             &again[..12],
             &broke[..12]
         )
     );
     let text = fs::read_to_string(history.dir.join("ley.toml")).unwrap();
-    assert!(
-        text.contains(&format!("since = 2026-04-01, sha = \"{}\"", &again[..12])),
-        "{text}"
-    );
+    assert_eq!(text, alpha_ledger(&recorded("2026-04-01", &again)));
 }
 
 #[test]
@@ -575,25 +584,19 @@ fn since_keeps_the_date_when_the_recorded_commit_is_gone() {
     let history = History::new();
     history.commit("src/words.txt", "other\n", "2026-01-01");
     fs::write(history.dir.join("src/words.txt"), "alpha\n").unwrap();
-    let row = ALPHA_ROW.replace(" },", ", since = 2026-01-15, sha = \"0123456789ab\" },");
-    let squashed = history.commit("ley.toml", &format!("row = [\n  {row}\n]\n"), "2026-05-01");
+    let ledger = alpha_ledger("since = 2026-01-15\nsha = \"0123456789ab\"\n");
+    let squashed = history.commit("ley.toml", &ledger, "2026-05-01");
 
     let printed = stdout(&ley(&history.dir, &["since"]));
     assert_eq!(
         printed,
         format!(
-            "ley.toml:2: \"alpha\": true since at least 2026-01-15: the date is kept, and the commit is now {}, the earliest one in this history\nRecorded 1 row in ley.toml.\n",
+            "ley.toml:1: \"alpha\": true since at least 2026-01-15: the date is kept, and the commit is now {}, the earliest one in this history\nRecorded 1 row in ley.toml.\n",
             &squashed[..12]
         )
     );
     let text = fs::read_to_string(history.dir.join("ley.toml")).unwrap();
-    assert!(
-        text.contains(&format!(
-            "since = 2026-01-15, sha = \"{}\"",
-            &squashed[..12]
-        )),
-        "{text}"
-    );
+    assert_eq!(text, alpha_ledger(&recorded("2026-01-15", &squashed)));
 }
 
 #[test]
@@ -603,17 +606,17 @@ fn since_removes_the_date_of_a_row_that_no_longer_holds() {
     }
     let history = History::new();
     history.commit("src/words.txt", "other\n", "2026-01-01");
-    let row = ALPHA_ROW.replace(" },", ", since = 2025-06-01, sha = \"0123456789ab\" },");
-    history.commit("ley.toml", &format!("row = [\n  {row}\n]\n"), "2026-02-01");
+    let ledger = alpha_ledger("since = 2025-06-01\nsha = \"0123456789ab\"\n");
+    history.commit("ley.toml", &ledger, "2026-02-01");
 
     let output = ley(&history.dir, &["since"]);
     assert!(output.status.success());
     assert_eq!(
         stdout(&output),
-        "ley.toml:2: \"alpha\": does not hold at the current commit (the command showed 0): the recorded date is removed\nRecorded 1 row in ley.toml.\n"
+        "ley.toml:1: \"alpha\": does not hold at the current commit (the command showed 0): the recorded date is removed\nRecorded 1 row in ley.toml.\n"
     );
     let text = fs::read_to_string(history.dir.join("ley.toml")).unwrap();
-    assert_eq!(text, format!("row = [\n  {ALPHA_ROW}\n]\n"));
+    assert_eq!(text, alpha_ledger(""));
 }
 
 #[test]
@@ -623,8 +626,7 @@ fn since_says_so_when_a_program_could_not_run() {
     }
     let history = History::new();
     history.commit("src/words.txt", "alpha\n", "2026-01-01");
-    let row = ALPHA_ROW.replace(" },", ", since = 2026-01-01, sha = \"0123456789ab\" },");
-    let ledger = format!("row = [\n  {row}\n]\n");
+    let ledger = alpha_ledger("since = 2026-01-01\nsha = \"0123456789ab\"\n");
     history.commit("ley.toml", &ledger, "2026-02-01");
 
     // A PATH that has git and nothing else.
@@ -645,7 +647,7 @@ fn since_says_so_when_a_program_could_not_run() {
         .unwrap();
     assert_eq!(
         stdout(&output),
-        "ley.toml:2: \"alpha\": could not run: `rg` was not found on PATH\nNothing to record.\n"
+        "ley.toml:1: \"alpha\": could not run: `rg` was not found on PATH\nNothing to record.\n"
     );
     assert_eq!(output.status.code(), Some(1));
     // The date it had is left alone: nothing showed it to be wrong.
@@ -665,11 +667,7 @@ fn since_run_from_a_git_hook_leaves_the_users_checkout_alone() {
     let history = History::new();
     history.commit("src/words.txt", "alpha\n", "2026-01-01");
     history.commit("src/words.txt", "alpha\nmore\n", "2026-02-01");
-    history.commit(
-        "ley.toml",
-        &format!("row = [\n  {ALPHA_ROW}\n]\n"),
-        "2026-03-01",
-    );
+    history.commit("ley.toml", &alpha_ledger(""), "2026-03-01");
     let head = history.git(&["rev-parse", "HEAD"], "");
 
     // Git sets these when it runs a hook. They name the user's own repository.
@@ -707,20 +705,17 @@ fn since_sees_a_break_on_the_very_day_it_has_recorded() {
     }
     let history = History::new();
     history.commit("src/words.txt", "other\n", "2026-01-09");
-    let recorded = history.commit("src/words.txt", "alpha\n", "2026-01-10T08:00:00+00:00");
+    let was = history.commit("src/words.txt", "alpha\n", "2026-01-10T08:00:00+00:00");
     let broke = history.commit("src/words.txt", "other\n", "2026-01-10T16:00:00+00:00");
     fs::write(history.dir.join("src/words.txt"), "alpha\n").unwrap();
-    let row = ALPHA_ROW.replace(
-        " },",
-        &format!(", since = 2026-01-10, sha = \"{}\" }},", &recorded[..12]),
-    );
-    let again = history.commit("ley.toml", &format!("row = [\n  {row}\n]\n"), "2026-01-12");
+    let ledger = alpha_ledger(&recorded("2026-01-10", &was));
+    let again = history.commit("ley.toml", &ledger, "2026-01-12");
 
     let printed = stdout(&ley(&history.dir, &["since"]));
     assert_eq!(
         printed,
         format!(
-            "ley.toml:2: \"alpha\": true since at least 2026-01-12 (commit {}, held at 1 commit): moved later, because the row did not hold at commit {}\nRecorded 1 row in ley.toml.\n",
+            "ley.toml:1: \"alpha\": true since at least 2026-01-12 (commit {}, held at 1 commit): moved later, because the row did not hold at commit {}\nRecorded 1 row in ley.toml.\n",
             &again[..12],
             &broke[..12]
         )
@@ -736,7 +731,7 @@ fn a_personal_list_of_ignored_files_changes_nothing() {
     history.commit("src/words.txt", "alpha\n", "2026-01-01");
     one_row(
         &history.dir,
-        r#"{ name = "alpha", run = "rg -l -F alpha src", shows = "the files with alpha" },"#,
+        "name = \"alpha\"\nrun = \"rg -l -F alpha src\"\nshows = \"the files with alpha\"",
     );
     // A reader who ignores every .txt file, on their own machine only.
     let home = history.dir.with_file_name("home");

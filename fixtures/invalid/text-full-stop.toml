@@ -1,5 +1,6 @@
 # breaks: text
 # `ley` writes the sentence and adds the full stop. A second one would print "..".
-row = [
-  { name = "Quillon", is = "the codename for the nightly billing run.", said = [{ by = "maintainer", on = 2026-11-10 }] },
-]
+[[row]]
+name = "Quillon"
+is = "the codename for the nightly billing run."
+said = [{ by = "maintainer", on = 2026-11-10 }]

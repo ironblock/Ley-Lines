@@ -1,5 +1,6 @@
 # breaks: source
 # A source names who and when. A bare name has no date.
-row = [
-  { name = "Quillon", is = "the codename for the nightly billing run", said = ["maintainer"] },
-]
+[[row]]
+name = "Quillon"
+is = "the codename for the nightly billing run"
+said = ["maintainer"]

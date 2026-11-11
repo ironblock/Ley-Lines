@@ -1,4 +1,5 @@
 # A command that fits no shape is still a valid row. Readers see it. `ley check` reports it as "not checked" and never runs it.
-row = [
-  { name = "stage count", run = "rg -c -F '[stage.' pipeline.toml | sort", shows = "how many stages each file declares" },
-]
+[[row]]
+name = "stage count"
+run = "rg -c -F '[stage.' pipeline.toml | sort"
+shows = "how many stages each file declares"

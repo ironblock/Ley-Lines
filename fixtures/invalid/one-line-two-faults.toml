@@ -1,7 +1,0 @@
-# breaks: one-line
-# One row is split over two lines and two rows share a line. A count of lines would come out right. Each row is still checked by itself.
-row = [
-  { name = "a", run = "rg -n a src",
-    shows = "the lines with a" },
-  { name = "b", run = "rg -n b src", shows = "the lines with b" }, { name = "c", run = "rg -n c src", shows = "the lines with c" },
-]
