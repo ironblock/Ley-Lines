@@ -225,7 +225,7 @@ run = "rg -l -F '# breaks: source' fixtures/invalid"
 shows = "the broken ledgers that show what this rule refuses"
 count = 5
 since = 2026-11-11
-sha = "a7c8fbeac5b8"
+sha = "e69c5978b7eb"
 
 [[row]]
 name = "no grades"
