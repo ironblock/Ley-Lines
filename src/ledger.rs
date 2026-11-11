@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use toml::value::{Date, Datetime};
 use toml::{Table, Value};
 
-use crate::text::unseen;
+use crate::text::hidden;
 
 /// The file name `ley` looks for.
 pub const FILE_NAME: &str = "ley.toml";
@@ -565,7 +565,7 @@ fn text(table: &Table, key: &str, line: usize, problems: &mut Vec<Problem>) -> O
         // A new line would let a row forge a second row when it is printed. A control
         // character can rewrite what a terminal shows. A change of direction can make
         // a command read as another command.
-        unseen(value).map(|c| {
+        value.chars().find(|c| hidden(*c)).map(|c| {
             format!(
                 "holds U+{:04X}: text is one line, with no control character, no space \
                  but the plain one, and no character that a reader cannot see",
@@ -592,7 +592,7 @@ fn source(value: &Value) -> Result<Source, String> {
     }
     let by = match table.get("by") {
         Some(Value::String(by))
-            if !by.trim().is_empty() && by.trim() == by && unseen(by).is_none() =>
+            if !by.trim().is_empty() && by.trim() == by && !by.chars().any(hidden) =>
         {
             by.clone()
         }
@@ -605,32 +605,11 @@ fn source(value: &Value) -> Result<Source, String> {
         }
         _ => return Err(FORM.into()),
     };
-    // "by an agent on 2026-11-10, by someone else" would print as two sources.
-    if let Some(found) = a_date_in(&by) {
-        return Err(format!(
-            "`by` holds a date, {found}: `by` names who said it, and the date goes in `on`"
-        ));
-    }
     let on = match table.get("on") {
         Some(Value::Datetime(when)) => date(when).ok_or(FORM)?,
         _ => return Err(FORM.into()),
     };
     Ok(Source { by, on })
-}
-
-/// Text in the form of a date, 2026-11-10, anywhere in `text`.
-fn a_date_in(text: &str) -> Option<&str> {
-    const FORM: &[u8] = b"dddd-dd-dd";
-    let bytes = text.as_bytes();
-    (0..bytes.len().saturating_sub(FORM.len() - 1)).find_map(|at| {
-        let window = &bytes[at..at + FORM.len()];
-        let fits = window.iter().zip(FORM).all(|(byte, form)| match form {
-            b'd' => byte.is_ascii_digit(),
-            _ => byte == form,
-        });
-        // The window is all ASCII, so it starts and ends between characters.
-        fits.then(|| &text[at..at + FORM.len()])
-    })
 }
 
 /// A TOML date with no time and no offset.
@@ -643,9 +622,12 @@ fn date(when: &Datetime) -> Option<Date> {
 
 /// File endings that mark a word as a file, so that `stage.ts:12` is a position
 /// and `billing.internal:8443` or the image tag `billing/api:2` is not. The list
-/// cannot be complete. A missed ending lets a position through; it never refuses
-/// honest text. For the same reason it leaves out endings that are also the last
-/// part of many host names, such as `pl` and `ml`.
+/// cannot be complete, and a missed ending lets a position through.
+///
+/// Some endings here also end host names: `sh`, `rs`, `md` and others. A host of
+/// that kind, written with its port, is refused as a position. The list keeps
+/// them because the files are far more common in a ledger than the hosts. It
+/// leaves out `pl` and `ml`, where that is less clear.
 const FILE_ENDINGS: &[&str] = &[
     "adoc",
     "bat",
@@ -762,9 +744,18 @@ fn stored_output(text: &str) -> Option<String> {
             let ending = file
                 .rsplit_once('.')
                 .map(|(_, end)| end.to_ascii_lowercase());
+            // The file's own name, without a quote mark or bracket in front of it.
             let name = file.rsplit(['/', '\\']).next().unwrap_or(file);
-            let is_a_file = ending.is_some_and(|end| FILE_ENDINGS.contains(&end.as_str()))
-                || FILE_NAMES.contains(&name.to_ascii_lowercase().as_str());
+            let name = name
+                .trim_start_matches(|c: char| !c.is_alphanumeric())
+                .to_ascii_lowercase();
+            // `Dockerfile`, and `Dockerfile.prod` too.
+            let is_a_known_name = FILE_NAMES.iter().any(|known| {
+                name.strip_prefix(known)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+            });
+            let is_a_file =
+                is_a_known_name || ending.is_some_and(|end| FILE_ENDINGS.contains(&end.as_str()));
             if is_a_file && starts_with_digit(rest) {
                 return Some((*word).to_string());
             }
@@ -957,13 +948,18 @@ mod tests {
             ("built by docker/Dockerfile:3", Some("docker/Dockerfile:3")),
             ("the clause at lib/app.ex:40", Some("lib/app.ex:40")),
             ("the type in Main.hs:7", Some("Main.hs:7")),
+            ("the target at `Makefile:12`", Some("`Makefile:12`")),
+            (
+                "the stage (Dockerfile.prod:3) that builds it",
+                Some("(Dockerfile.prod:3)"),
+            ),
             ("line 12 of the glossary", Some("line 12")),
             // Not positions:
             ("the run at 10:30 each night", None),
             ("the page at https://example.org:8080/x", None),
             ("the proxy that listens on billing.internal:8443", None),
             ("the image published as billing/api:2", None),
-            // A host name that ends the way a kind of file does is still a host.
+            // A host whose name ends in a way this list leaves out.
             ("the mirror at example.pl:8080", None),
             ("the host 10.0.0.5:443", None),
             ("the ratio v1.2:3", None),
@@ -1169,33 +1165,11 @@ mod tests {
             let problems = parse(&text).unwrap_err();
             assert_eq!(problems[0].rule, "source", "{hidden}");
         }
-        // A joiner that a script needs is let through.
+        // A joiner that a script needs is refused too, for now. Nobody can see it.
         let text = "[[row]]\nname = \"a\"\nis = \"می\\u200Cخواهم\"\nsaid = [{ by = \"m\", on = 2026-11-10 }]\n";
-        assert!(parse(text).is_ok());
-    }
-
-    #[test]
-    fn a_source_s_name_holds_no_date() {
-        let text = "[[row]]\nname = \"a\"\nis = \"b\"\nsaid = [{ by = \"an agent on 2026-11-10, by Someone Else\", on = 2026-11-11 }]\n";
         let problems = parse(text).unwrap_err();
         assert_eq!(problems.len(), 1);
-        assert_eq!(problems[0].rule, "source");
-        assert!(
-            problems[0]
-                .message
-                .contains("`by` holds a date, 2026-11-10")
-        );
-        assert_eq!(a_date_in("minutes of 2026-11-03"), Some("2026-11-03"));
-        // A version, a year, and a name in another script are not dates.
-        for name in [
-            "Claude Fable 5.2",
-            "the 2026 review",
-            "Zoë 2026-11",
-            "山田 太郎",
-            "",
-        ] {
-            assert_eq!(a_date_in(name), None, "{name}");
-        }
+        assert!(problems[0].message.contains("`is` holds U+200C"));
     }
 
     #[test]

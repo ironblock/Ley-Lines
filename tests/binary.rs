@@ -1028,22 +1028,33 @@ fn a_since_that_is_stopped_half_way_leaves_nothing_in_the_repository() {
         .stdout(std::process::Stdio::null())
         .spawn()
         .unwrap();
-    let rg = loop {
+    /// Stops the waiting rg when the test ends, however it ends.
+    struct Waiting(u32);
+    impl Drop for Waiting {
+        fn drop(&mut self) {
+            let _ = Command::new("kill")
+                .args(["-9", &self.0.to_string()])
+                .status();
+        }
+    }
+    let started = std::time::Instant::now();
+    let _rg = loop {
         let said = fs::read_to_string(&waiting).unwrap_or_default();
         if let Ok(process) = said.trim().parse::<u32>() {
-            break process;
+            break Waiting(process);
         }
-        assert!(
-            child.try_wait().unwrap().is_none(),
-            "`ley since` ended before it started rg"
-        );
+        let ended = child.try_wait().unwrap().is_some();
+        if ended || started.elapsed().as_secs() > 60 {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("`ley since` did not start rg: ended early ({ended}), or took over a minute");
+        }
         std::thread::sleep(std::time::Duration::from_millis(5));
     };
     // Stop `ley` the way a closed terminal or a full machine would: with no chance
-    // to tidy up. Then stop the rg it left waiting.
+    // to tidy up.
     child.kill().unwrap();
     child.wait().unwrap();
-    let _ = Command::new("kill").args(["-9", &rg.to_string()]).status();
 
     // What is left behind is in the temporary directory, and only there.
     let left_behind = fs::read_dir(&temporary)
@@ -1086,29 +1097,32 @@ fn show_reads_several_words_as_one_name() {
     );
     assert!(!rule.contains("earliest known"), "{rule}");
 
-    // When no name holds all the words, each word is a name of its own, and a row
-    // that two of them select is printed once.
-    let both = ley(&dir, &["show", "stage", "platform", "Stage"]);
-    assert!(both.status.success());
-    let both = stdout(&both);
-    assert_eq!(
-        both,
-        format!(
-            "{}\n{}",
-            stdout(&ley(&dir, &["show", "stage"])),
-            stdout(&ley(&dir, &["show", "platform"]))
-        )
+    // The words are always one name. `ley` does not guess where a name ends: no row
+    // is named "stage platform", so nothing is printed, and a mistyped word does not
+    // bring up the rows that the other words would find.
+    let both = ley(&dir, &["show", "stage", "platform"]);
+    assert_eq!(both.status.code(), Some(1));
+    assert_eq!(stdout(&both), "");
+    assert!(
+        String::from_utf8_lossy(&both.stderr)
+            .contains("no row has a name containing \"stage platform\"")
     );
+    let mistyped = ley(repository(), &["show", "no", "stored", "outputt"]);
+    assert_eq!(mistyped.status.code(), Some(1));
+    assert_eq!(stdout(&mistyped), "");
 }
 
 #[test]
 fn show_prints_each_source_on_a_line_of_its_own() {
-    let shown = stdout(&ley(repository(), &["show", "ledger"]));
-    assert!(
-        shown.contains(
-            "\n  Said by Claude Fable 5.2 on 2026-11-10.\n  Said by Corey Vixie on 2026-11-11.\n"
-        ),
-        "{shown}"
+    let holder = tempfile::tempdir().unwrap();
+    fs::write(
+        holder.path().join("ley.toml"),
+        "[[row]]\nname = \"Quillon\"\nis = \"the nightly billing run\"\nsaid = [\n  { by = \"Ada, of the billing team\", on = 2026-11-10 },\n  { by = \"Grace\", on = 2026-11-11 },\n]\n",
+    )
+    .unwrap();
+    assert_eq!(
+        stdout(&ley(holder.path(), &["show", "quillon"])),
+        "Quillon is the nightly billing run.\n  Said by Ada, of the billing team on 2026-11-10.\n  Said by Grace on 2026-11-11.\n"
     );
 }
 
@@ -1188,5 +1202,69 @@ fn since_says_when_it_did_not_check_a_date() {
     assert_eq!(
         fs::read_to_string(history.dir.join("ley.toml")).unwrap(),
         ledger
+    );
+}
+
+// The next tests come from a fifth review, of the fixes for the fourth.
+
+#[test]
+fn a_glob_cannot_reach_into_git() {
+    if !have(&["rg", "ast-grep", "git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit(
+        "src/notes.js",
+        "// ref: in the notes\nconst one = 1;\n",
+        "2026-01-01",
+    );
+    // What git keeps is not the same in every clone. `.git/HEAD` holds "ref:", and
+    // this file would be a second match for the pattern below.
+    fs::write(history.dir.join(".git/extra.js"), "const two = 2;\n").unwrap();
+    // A glob as plain as `*` makes both programs search hidden places. The ledger
+    // itself holds the words of its own commands, so it is one of the files found.
+    rows(
+        &history.dir,
+        &[
+            "name = \"ref\"\nrun = \"rg -l -F ref: -g '*' .\"\nshows = \"the files that hold a ref\"\ncount = 2",
+            "name = \"const\"\nrun = \"ast-grep run -l js -p 'const $A = $B' --globs '*' .\"\nshows = \"each constant\"",
+        ],
+    );
+    let output = ley(&history.dir, &["check"]);
+    assert_eq!(stdout(&output), "2 rows: 2 hold.\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_that_leads_into_git_is_not_followed() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("src/notes.txt", "notes\n", "2026-01-01");
+    std::os::unix::fs::symlink(".git", history.dir.join("kept")).unwrap();
+    one_row(
+        &history.dir,
+        "name = \"head\"\nrun = \"rg -n -F ref: kept/HEAD\"\nshows = \"the branch this clone is on\"",
+    );
+    let output = ley(&history.dir, &["check"]);
+    assert_eq!(
+        stdout(&output),
+        "ley.toml:1: could not run: \"head\": `kept/HEAD` leads into `.git`, which is not the same in every clone\n    rg -n -F ref: kept/HEAD\n1 row: 1 could not run.\n"
+    );
+}
+
+#[test]
+fn since_says_plainly_when_there_are_no_commits() {
+    if !have(&["git"]) {
+        return;
+    }
+    let history = History::new();
+    fs::write(history.dir.join("ley.toml"), alpha_ledger("")).unwrap();
+    let output = ley(&history.dir, &["since"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "ley: the repository has no commits yet\n"
     );
 }

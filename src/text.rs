@@ -2,11 +2,16 @@
 
 /// True for a character that does not show as itself on one line of text. It
 /// breaks the line, moves the cursor, changes the direction of what follows, looks
-/// like a space and is not one, or cannot be seen at all. `ley` prints none raw.
+/// like a space and is not one, or cannot be seen at all. A ledger's text may hold
+/// none, and `ley` prints none raw.
 ///
 /// The list of what cannot be seen is the Unicode property
 /// Default_Ignorable_Code_Point, as of Unicode 18. It includes the tag characters,
 /// which a person does not see and a model reads as letters.
+///
+/// There is no exception. A few scripts need a joiner that has no shape of its
+/// own, and a ledger cannot hold one yet. An exception wide enough for those
+/// scripts was tried, and it was wide enough to carry text that nobody sees.
 ///
 /// Characters that look alike across scripts, such as a Cyrillic "а" for a Latin
 /// "a", are not found here. Nothing in `ley` finds them.
@@ -37,43 +42,6 @@ fn not_shown(c: char) -> bool {
         | '\u{FFA0}' | '\u{FFF0}'..='\u{FFF8}' | '\u{1BCA0}'..='\u{1BCA3}'
         | '\u{1D173}'..='\u{1D17A}' | '\u{E0000}'..='\u{E0FFF}'
     )
-}
-
-/// A mark with no shape of its own that some scripts cannot be written without: a
-/// joiner, or a mark that picks one form of the letter before it.
-fn joins(c: char) -> bool {
-    matches!(
-        c,
-        '\u{200C}' | '\u{200D}' | '\u{034F}' | '\u{17B4}'..='\u{17B5}' | '\u{180B}'..='\u{180F}'
-        | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}'
-    )
-}
-
-/// The first character of `text` that a reader cannot see as text, if there is one.
-///
-/// A hidden character is one. The exception is a mark that a script needs, where
-/// that script would put it: after a letter that is not ASCII, and no more than
-/// two in a row. So a word of Persian keeps its joiner, and a line of English
-/// cannot carry marks that nobody sees.
-pub fn unseen(text: &str) -> Option<char> {
-    // How many marks have come since the last character with a shape, and whether
-    // that character was one a script's mark can follow.
-    let mut marks = 0;
-    let mut after_a_letter_of_a_script = false;
-    for c in text.chars() {
-        if joins(c) {
-            marks += 1;
-            if !after_a_letter_of_a_script || marks > 2 {
-                return Some(c);
-            }
-        } else if hidden(c) {
-            return Some(c);
-        } else {
-            marks = 0;
-            after_a_letter_of_a_script = !c.is_ascii();
-        }
-    }
-    None
 }
 
 /// `text` with every hidden character written out, as `\u{1b}`. Text that `ley` did
@@ -176,28 +144,20 @@ mod tests {
     }
 
     #[test]
-    fn a_mark_a_script_needs_is_seen_where_the_script_puts_it() {
-        // Persian, with a joiner between two letters.
-        assert_eq!(unseen("می\u{200c}خواهم"), None);
-        // Devanagari, with a joiner after a mark that is itself not a letter.
-        assert_eq!(unseen("क\u{94d}\u{200d}ष"), None);
-        // A sign with the mark that asks for its coloured form, and a family joined from three.
-        assert_eq!(unseen("done ✔\u{fe0f}"), None);
-        assert_eq!(unseen("👩\u{200d}❤\u{fe0f}\u{200d}👨"), None);
-        // The same marks in English are not text a reader can see.
-        assert_eq!(unseen("bill\u{200d}ing"), Some('\u{200d}'));
-        assert_eq!(unseen("a\u{fe0f}"), Some('\u{fe0f}'));
-        assert_eq!(unseen("\u{200c}start"), Some('\u{200c}'));
-        // Nor is a run of them, which could carry a message of its own.
-        assert_eq!(unseen("✔\u{fe0f}\u{200d}\u{200c}"), Some('\u{200c}'));
-        // Everything else that is hidden is refused wherever it is.
-        assert_eq!(unseen("می\u{200b}خواهم"), Some('\u{200b}'));
-        assert_eq!(
-            unseen("the line\u{e0049}\u{e0047} with it"),
-            Some('\u{e0049}')
-        );
-        assert_eq!(unseen("rg -n -F alpha\u{a0}src"), Some('\u{a0}'));
-        assert_eq!(unseen("plain text"), None);
+    fn a_mark_with_no_shape_is_hidden_wherever_it_is() {
+        // A joiner in a word of Persian, a mark that asks for the coloured form of a
+        // sign, a mark that picks one form of an ideograph. Each is honest text, and
+        // each is refused for now: nobody can see it.
+        for c in [
+            '\u{200c}',
+            '\u{200d}',
+            '\u{fe0f}',
+            '\u{fe00}',
+            '\u{e0100}',
+            '\u{34f}',
+        ] {
+            assert!(hidden(c), "U+{:04X}", c as u32);
+        }
     }
 
     #[test]

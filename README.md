@@ -86,7 +86,7 @@ A definition is different. No command stands behind "Quillon is the codename for
 
 A ledger follows ten rules. `ley` enforces the ones a program can enforce. Each of those has a fixture in [`fixtures`](fixtures): a small file that breaks the rule and says why.
 
-1. **show, do not state.** A row gives a command that shows the thing, and says only what kind of thing the command shows. "The package manager this directory declares" stays true when the version changes. A sentence that names the version does not, and the row would go on holding. `ley check` reports a row whose `shows` repeats a value or a phrase that its command printed. It cannot find a paraphrase, a single digit, or a single plain word.
+1. **show, do not state.** A row gives a command that shows the thing, and says only what kind of thing the command shows. "The package manager this directory declares" stays true when the version changes. A sentence that names the version does not, and the row would go on holding. `ley check` reports a row whose `shows` repeats a value or a phrase that its command printed. It cannot find a paraphrase. It does not look for a value of fewer than four characters, such as a port number: a short number is in every list of line numbers.
 2. **no stored output.** Nothing a command printed is kept in a row: no value, no file position, no line number, no matched text. Those are the first things to go out of date.
 3. **a command or a source.** Every sentence in a ledger is either what a command shows, or what a named source said on a date. Some facts have no command: what a codename means, why a choice was made. Those rows say who said so, and when.
 4. **no grades.** A ledger records who said a thing and when. It does not rank its sources or assign a level of trust. The reader can count the sources and weigh them. An agent is a source like any other, and is named as one.
@@ -127,7 +127,7 @@ A row has `is`, or `run`, or both. What kind of row it is follows from the keys 
 
 A row is a `[[row]]` block, and every field of the row sits inside it, on a line of its own. TOML has other ways to write the same rows: all the fields on one line, or the sources in a `[[row.said]]` block of their own. `ley` refuses both, so a row is written one way only. The `=` signs may be lined up or not: `ley` does not mind, and `ley since` writes its two lines to match the block.
 
-Text is one line. It holds no control character, no space but the plain one, and no character that a reader cannot see. Some of those a person does not see and a model reads as letters. So a row cannot print as two rows, a command cannot read as another command, and a sentence cannot carry a second message. A mark that a script needs, such as the joiner in Persian, is allowed where that script puts it. Letters that look alike across scripts are not found.
+Text is one line. It holds no control character, no space but the plain one, and no character that a reader cannot see. Some of those a person does not see and a model reads as letters. So a row cannot print as two rows, and a command cannot read as another command. The rule has no exception, and it refuses some honest text: a few scripts need a joiner that has no shape of its own, and a ledger cannot hold one yet. Letters that look alike across scripts are not found.
 
 A result is one line for `rg`, one match for `ast-grep run` and `ast-grep scan`, and one symbol for `ast-grep outline`.
 
@@ -160,6 +160,8 @@ It exits with 0 when every command that ran holds. With `--strict`, a row that w
 
 Git checks those files out the way it would for you. So it runs the filters that your git settings name for checking files out. It also fetches what a commit needs and the clone does not have: large files kept by git-lfs, and files that a partial clone left out. Those are the only things a walk adds to the repository.
 
+`ley since` judges commits, and `ley check` judges the files in front of you. A row about a file that is in no commit, such as a file a build writes or a file inside a submodule, can hold for `ley check` and still cannot be dated. `ley since` says that such a row does not hold at the current commit.
+
 When a command could not run at an older commit, the walk stops there for that row and says so. That is not a commit at which the row did not hold, so it moves no date.
 
 ## What `ley check` will run
@@ -171,7 +173,7 @@ $ ley shapes
 rg
     search text; each line printed is one result
     needs a path
-    `ley` adds: --no-config --no-ignore-global --no-ignore-exclude
+    `ley` adds: --no-config --no-ignore-global --no-ignore-exclude -g '!.git'
     flags: -n --line-number -N --no-line-number -i --ignore-case -s
         --case-sensitive -S --smart-case -w --word-regexp -x --line-regexp -F
         --fixed-strings -o --only-matching -l --files-with-matches --files
@@ -179,23 +181,26 @@ rg
 
 ast-grep run
     match a code pattern; each match is one result
-    `ley` adds: --no-ignore global --no-ignore exclude --json=stream
+    `ley` adds: --no-ignore global --no-ignore exclude --json=stream --globs
+        '!.git'
     needs one of: -p --pattern -k --kind
     options, each with a value: -p --pattern -k --kind -l --lang --selector
         --strictness --globs
 
 ast-grep scan
     match a rule; each match is one result
-    `ley` adds: --no-ignore global --no-ignore exclude --json=stream
+    `ley` adds: --no-ignore global --no-ignore exclude --json=stream --globs
+        '!.git'
     needs one of: --inline-rules -r --rule
     options, each with a value: --inline-rules -r --rule --globs
 
 ast-grep outline
     list the symbols in files; each top-level symbol is one result
-    `ley` adds: --no-ignore global --no-ignore exclude --json=stream
+    `ley` adds: --no-ignore global --no-ignore exclude --json=stream --globs
+        '!.git'
     options, each with a value: -l --lang --items --type --match --view --globs
 
-Paths are relative and stay inside the ledger's directory.
+Paths are relative and stay inside the ledger's directory, and out of `.git`.
 A command that fits no shape is shown to readers but never run.
 ```
 
@@ -205,7 +210,9 @@ A command that fits no shape is still a valid row. Readers see it, and `ley chec
 
 `ley` starts each program directly, with no shell, in the ledger's directory, with nothing on standard input. It adds flags to each program so that a count depends on the repository and not on the machine: no personal ripgrep configuration file, and no personal list of ignored files. The row itself never carries those flags. One gap is known: a personal `.ignore` file in a directory above the repository still applies. A test compares how `ley` and a real `sh` split each fixture command into words. They must agree.
 
-Before it starts a program, `ley` looks at each path the row names. A path that is not there is reported. So is a path that a link leads out of the ledger's directory: what is there is not the same for every reader. A path inside `.git` is refused for the same reason.
+Before it starts a program, `ley` looks at each path the row names. A path that is not there is reported. So is a path that a link leads out of the ledger's directory: what is there is not the same for every reader.
+
+`ley` keeps every search out of `.git` for the same reason. A row may not name a path inside it, and a link may not lead into it. A glob cannot reach it either. A glob as plain as `*` makes both programs search hidden places, so `ley` ends each command with a glob of its own that shuts `.git` out. Of two globs that match, the later one wins.
 
 Running `ley check` in a repository trusts that repository as much as running `rg` or `ast-grep` there yourself does. It does not trust it more.
 

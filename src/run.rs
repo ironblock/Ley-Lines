@@ -192,13 +192,24 @@ fn path_fault(plan: &Plan, dir: &Path) -> Option<String> {
     for path in &plan.paths {
         match dir.join(path).canonicalize() {
             Err(_) => return Some(format!("`{}` is not there", shown(path))),
-            Ok(real) if !real.starts_with(&home) => {
-                return Some(format!(
-                    "`{}` leads out of the ledger's directory",
-                    shown(path)
-                ));
+            Ok(real) => {
+                let Ok(below) = real.strip_prefix(&home) else {
+                    return Some(format!(
+                        "`{}` leads out of the ledger's directory",
+                        shown(path)
+                    ));
+                };
+                // A link can lead into `.git` under another name.
+                let into_git = below
+                    .components()
+                    .any(|part| part.as_os_str().eq_ignore_ascii_case(".git"));
+                if into_git {
+                    return Some(format!(
+                        "`{}` leads into `.git`, which is not the same in every clone",
+                        shown(path)
+                    ));
+                }
             }
-            Ok(_) => {}
         }
     }
     None

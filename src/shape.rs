@@ -37,6 +37,9 @@ pub struct Shape {
     /// Flags `ley` adds each time it runs the program. A row never carries them.
     #[serde(default)]
     pub adds: Vec<String>,
+    /// Flags `ley` adds after the row's own, where they win over any glob the row gives.
+    #[serde(default)]
+    pub adds_last: Vec<String>,
     #[serde(default)]
     pub needs_one_of: Vec<String>,
     #[serde(default)]
@@ -118,17 +121,18 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
     let mut seen: Vec<&str> = Vec::new();
     let mut named_paths: Vec<String> = Vec::new();
     let mut positional: Vec<&str> = Vec::new();
-    let mut only_positional = false;
+    // Where the row's `--` is, if it has one. After it, nothing is read as a flag.
+    let mut separator: Option<usize> = None;
     let mut i = 0;
     while i < rest.len() {
         let word = rest[i].as_str();
         i += 1;
-        if only_positional || !word.starts_with('-') || word == "-" {
+        if separator.is_some() || !word.starts_with('-') || word == "-" {
             positional.push(word);
             continue;
         }
         if word == "--" {
-            only_positional = true;
+            separator = Some(i - 1);
             continue;
         }
         let (name, inline) = match word.split_once('=') {
@@ -185,8 +189,12 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
         ));
     }
 
-    // Added flags go right after the program and its subcommand, before any `--`.
+    // The flags that go last sit after the row's own flags, and before a `--`:
+    // after that, the program would read them as paths.
     let mut plain = words.to_vec();
+    let last = separator.map_or(plain.len(), |index| at + index);
+    plain.splice(last..last, shape.adds_last.iter().cloned());
+    // The other added flags go right after the program and its subcommand.
     plain.splice(at..at, shape.adds.iter().cloned());
     let (argv, plain) = match shape.counts {
         Counts::Lines => (plain, None),
@@ -221,7 +229,11 @@ fn inside(path: &str) -> Result<(), String> {
     if path.split(['/', '\\']).any(|part| part == "..") {
         return Err(format!("`{path}` leaves the ledger's directory"));
     }
-    if path.split(['/', '\\']).any(|part| part == ".git") {
+    // Some file systems read `.GIT` as `.git`.
+    if path
+        .split(['/', '\\'])
+        .any(|part| part.eq_ignore_ascii_case(".git"))
+    {
         return Err(format!(
             "`{path}` is inside `.git`, which is not the same in every clone"
         ));
@@ -241,6 +253,11 @@ pub fn describe() -> String {
         if matches!(shape.counts, Counts::JsonLines | Counts::JsonItems) {
             adds.push("--json=stream".into());
         }
+        // Written the way a reader would have to type it.
+        adds.extend(shape.adds_last.iter().map(|word| match word.contains('!') {
+            true => format!("'{word}'"),
+            false => word.clone(),
+        }));
         if !adds.is_empty() {
             out.push_str(&listed("`ley` adds:", &adds));
         }
@@ -256,7 +273,7 @@ pub fn describe() -> String {
         out.push('\n');
     }
     out.push_str(
-        "Paths are relative and stay inside the ledger's directory.\n\
+        "Paths are relative and stay inside the ledger's directory, and out of `.git`.\n\
          A command that fits no shape is shown to readers but never run.\n",
     );
     out
@@ -312,7 +329,11 @@ mod tests {
                 "--no-ignore-exclude"
             ]
         );
-        assert_eq!(plan.argv[4..], ["-n", "interface Stage", "src"]);
+        // Then the row's own words, and last the glob that keeps rg out of `.git`.
+        assert_eq!(
+            plan.argv[4..],
+            ["-n", "interface Stage", "src", "-g", "!.git"]
+        );
         assert_eq!(plan.plain, None);
         assert_eq!(plan.counts, Counts::Lines);
         assert_eq!(plan.paths, ["src"]);
@@ -329,16 +350,30 @@ mod tests {
         let plain = plan.plain.as_ref().unwrap();
         assert!(!plain.iter().any(|word| word.starts_with("--json")));
         assert_eq!(
-            plain[plain.len() - 5..],
-            ["--type", "interface", "--match", "^Stage$", "src"]
+            plain[plain.len() - 7..],
+            [
+                "--type",
+                "interface",
+                "--match",
+                "^Stage$",
+                "src",
+                "--globs",
+                "!.git"
+            ]
         );
         assert_eq!(plan.counts, Counts::JsonItems);
         // Added flags go before a `--`, so they are read as flags.
         let plan = fit("ast-grep run -p 'foo($A)' -- src").unwrap();
         assert_eq!(plan.argv[..3], ["ast-grep", "run", "--json=stream"]);
         assert_eq!(
-            plan.argv[plan.argv.len() - 4..],
-            ["-p", "foo($A)", "--", "src"]
+            plan.argv[plan.argv.len() - 6..],
+            ["-p", "foo($A)", "--globs", "!.git", "--", "src"]
+        );
+        // A `--` that is the value of an option is not the end of the flags.
+        let plan = fit("rg -e -- -g '*' src").unwrap();
+        assert_eq!(
+            plan.argv[plan.argv.len() - 7..],
+            ["-e", "--", "-g", "*", "src", "-g", "!.git"]
         );
     }
 
@@ -363,6 +398,7 @@ mod tests {
             ("rg Stage ../other", "leaves the ledger's directory"),
             ("rg Stage src/../../x", "leaves the ledger's directory"),
             ("rg -n main .git/HEAD", "is inside `.git`"),
+            ("rg -n main sub/.GIT/config", "is inside `.git`"),
             ("rg -g", "`-g` needs a value"),
             ("rg --files=yes src", "takes no value"),
             ("ast-grep run src", "needs one of"),

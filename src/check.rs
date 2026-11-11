@@ -59,11 +59,11 @@ fn counted(pointer: &Pointer, dir: &Path, limit: Duration) -> (Status, Option<(P
 ///
 /// - a word that looks like a value or a name: four characters or more, with a
 ///   digit, a capital letter, or one of `@ = / _` among them;
-/// - a shorter word with a digit in it, down to two characters: `30`, `v2`;
 /// - two plain words in a row, each of four letters or more.
 ///
-/// A single digit and a single plain word are let through. Each would be found in
-/// too much honest text.
+/// A shorter value, such as a port number, is let through. So is a single plain
+/// word. Each would be found in too much honest text: a short number is in every
+/// list of line numbers that `rg -n` prints.
 pub fn restated(pointer: &Pointer, name: &str, printed: &str) -> Option<String> {
     let allowed = format!("{} {name}", pointer.run).to_lowercase();
     let printed_lower = printed
@@ -78,13 +78,10 @@ pub fn restated(pointer: &Pointer, name: &str, printed: &str) -> Option<String> 
         .collect();
 
     for word in &words {
-        let length = word.chars().count();
-        let has_a_digit = word.chars().any(|c| c.is_ascii_digit());
-        let looks_like_a_value = (length >= 2 && has_a_digit)
-            || (length >= 4
-                && word
-                    .chars()
-                    .any(|c| c.is_uppercase() || matches!(c, '@' | '=' | '/' | '_')));
+        let looks_like_a_value = word.chars().count() >= 4
+            && word.chars().any(|c| {
+                c.is_ascii_digit() || c.is_uppercase() || matches!(c, '@' | '=' | '/' | '_')
+            });
         if looks_like_a_value && !allowed.contains(&word.to_lowercase()) && has_word(printed, word)
         {
             return Some((*word).to_string());
@@ -271,22 +268,14 @@ mod tests {
     }
 
     #[test]
-    fn a_short_value_copied_into_shows_is_found() {
-        for (shows, printed, found) in [
-            ("the retry limit, which is 30", "4:retries = 30\n", "30"),
-            (
-                "the port the service listens on: 443",
-                "9:listen = 443\n",
-                "443",
-            ),
-            ("the version in use, v2", "1:api = \"v2\"\n", "v2"),
-        ] {
-            let row = pointer("rg -n -F setting config", shows);
-            assert_eq!(restated(&row, "x", printed).as_deref(), Some(found));
-        }
-        // One digit says too little to be called a repeat.
-        let row = pointer("rg -n -F setting config", "the 3 settings that matter");
-        assert_eq!(restated(&row, "x", "3:setting = on\n"), None);
+    fn a_number_that_is_also_a_line_number_is_not_a_repeat() {
+        // `rg -n` prints the line number of every match. A row may name a number
+        // of months without storing anything the command printed.
+        let row = pointer(
+            "rg -n -F month cal.toml",
+            "each month of the 12 that open a quarter",
+        );
+        assert_eq!(restated(&row, "x", "11:month = 1\n12:month = 4\n"), None);
     }
 
     #[test]

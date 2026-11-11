@@ -62,11 +62,11 @@ enum Cmd {
     /// whose name contains it. Letter case is ignored. Nothing is run.
     ///
     /// A name of several words needs no quotes: `ley show no stored output`.
-    /// When no name holds all the words together, each word is looked up as a
-    /// name of its own.
+    /// The words are always read as one name. To look up two names, run
+    /// `ley show` twice.
     Show {
         /// The name to look up
-        names: Vec<String>,
+        name: Vec<String>,
     },
     /// Run each row's command and compare what it shows with what the row says
     ///
@@ -80,7 +80,9 @@ enum Cmd {
     /// part of what the command printed. A row says what kind of thing its
     /// command shows. It does not say the thing.
     ///
-    /// "could not run": the program is missing, too old, or said it failed.
+    /// "could not run": the program is missing, too old, or said it failed. Or
+    /// a path the row names is not there, or a link leads it out of the
+    /// ledger's directory or into `.git`. Then no program is started.
     ///
     /// "not checked": the command fits no shape, so `ley` did not run it. See
     /// `ley shapes`.
@@ -173,7 +175,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
 
     match cli.command {
         Cmd::Shapes | Cmd::Rules => unreachable!("handled above"),
-        Cmd::Show { names } => Ok(show_rows(&ledger, &names)),
+        Cmd::Show { name } => Ok(show_rows(&ledger, &name)),
         Cmd::Check { strict, verbose } => {
             let (lines, tally) = check::check(&ledger, verbose, run::LIMIT);
             for line in lines {
@@ -210,43 +212,21 @@ fn locate(named: Option<PathBuf>) -> Result<PathBuf, String> {
     })
 }
 
-fn show_rows(ledger: &Ledger, names: &[String]) -> ExitCode {
-    if names.is_empty() {
+fn show_rows(ledger: &Ledger, words: &[String]) -> ExitCode {
+    if words.is_empty() {
         print!("{}", show::index(ledger));
         return ExitCode::SUCCESS;
     }
     // Most names are several words, and a reader types them without quotes. So the
-    // words are first read as one name. Only when no name holds them all is each
-    // word a name of its own.
-    let together = names.join(" ");
-    let names = match names.len() > 1 && !show::select(ledger, &together).is_empty() {
-        true => vec![together],
-        false => names.to_vec(),
-    };
-    let mut code = ExitCode::SUCCESS;
-    let mut printed: Vec<*const ledger::Row> = Vec::new();
-    for name in &names {
-        let rows = show::select(ledger, name);
-        if rows.is_empty() {
-            eprintln!("ley: no row has a name containing \"{}\"", shown(name));
-            code = ExitCode::FAILURE;
-            continue;
-        }
-        // A row that two of the names select is printed once.
-        let new: Vec<&ledger::Row> = rows
-            .into_iter()
-            .filter(|row| !printed.contains(&std::ptr::from_ref(*row)))
-            .collect();
-        if new.is_empty() {
-            continue;
-        }
-        if !printed.is_empty() {
-            println!();
-        }
-        printed.extend(new.iter().map(|row| std::ptr::from_ref(*row)));
-        print!("{}", show::render(&new));
+    // words are one name, always: `ley` does not guess where one name ends.
+    let name = words.join(" ");
+    let rows = show::select(ledger, &name);
+    if rows.is_empty() {
+        eprintln!("ley: no row has a name containing \"{}\"", shown(&name));
+        return ExitCode::FAILURE;
     }
-    code
+    print!("{}", show::render(&rows));
+    ExitCode::SUCCESS
 }
 
 fn record_since(ledger: &Ledger, dry_run: bool) -> Result<ExitCode, String> {

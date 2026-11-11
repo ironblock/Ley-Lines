@@ -33,11 +33,12 @@ pub fn have(programs: &[&str]) -> bool {
 }
 
 /// Take away what this machine and its owner have set for git, so that a test
-/// sees the same thing everywhere.
+/// sees the same thing everywhere. That includes the language git answers in.
 fn without_personal_git_settings(command: &mut Command) -> &mut Command {
     command
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("LC_ALL", "C")
 }
 
 /// The built `ley`, about to run in `dir`.

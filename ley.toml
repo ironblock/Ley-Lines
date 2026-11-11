@@ -140,7 +140,7 @@ sha = "e605d06fb4f4"
 
 [[row]]
 name = "hidden character"
-is = "a character that does not show as itself on one line of text: a line break, a control character, or one that hides or reorders what a reader sees"
+is = "a character that does not show as itself on one line of text: a line break, a control character, a space other than the plain one, or a character that cannot be seen or that reorders what a reader sees"
 said = [{ by = "Claude Fable 5.2", on = 2026-11-11 }]
 
 [[row]]
@@ -223,7 +223,7 @@ said = [{ by = "Claude Fable 5.2", on = 2026-11-10 }]
 name = "a command or a source"
 run = "rg -l -F '# breaks: source' fixtures/invalid"
 shows = "the broken ledgers that show what this rule refuses"
-count = 6
+count = 5
 since = 2026-11-11
 sha = "a7c8fbeac5b8"
 

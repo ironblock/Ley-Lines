@@ -11,7 +11,8 @@
 # Leave out any flag that writes files, runs another program, changes what one
 # result means, or makes the count depend on the machine. `--hidden` and
 # `--no-ignore` are left out for the last reason: they search `.git` and build
-# output, which differ from one clone to the next. A row can name a hidden path.
+# output, which differ from one clone to the next. A row can name a hidden path,
+# other than `.git`.
 
 [[shape]]
 program = "rg"
@@ -23,6 +24,10 @@ needs_path = true
 # `ley` adds these, so that what is counted depends on the repository and not on the
 # machine: no personal ripgrep configuration file, no personal list of ignored files.
 adds = ["--no-config", "--no-ignore-global", "--no-ignore-exclude"]
+# `ley` adds this after the row's own flags. A glob as plain as `*` makes rg search
+# hidden places, `.git` among them, and what is in `.git` differs from one clone to
+# the next. Of two globs that match, the later one wins, so this one goes last.
+adds_last = ["-g", "!.git"]
 # The first word that is not a flag is the pattern, unless one of these is present.
 no_pattern_with = ["-e", "--regexp", "--files"]
 flags = [
@@ -49,6 +54,8 @@ options = [
 program = "ast-grep"
 sub = "run"
 adds = ["--no-ignore", "global", "--no-ignore", "exclude"]
+# As for rg: a glob can reach into `.git`, and the later glob wins.
+adds_last = ["--globs", "!.git"]
 about = "match a code pattern; each match is one result"
 counts = "json-lines"
 needs_one_of = ["-p", "--pattern", "-k", "--kind"]
@@ -65,6 +72,7 @@ options = [
 program = "ast-grep"
 sub = "scan"
 adds = ["--no-ignore", "global", "--no-ignore", "exclude"]
+adds_last = ["--globs", "!.git"]
 about = "match a rule; each match is one result"
 counts = "json-lines"
 # Without one of these, scan reads the project's own rule files, and the row
@@ -77,6 +85,7 @@ path_options = ["-r", "--rule"]
 program = "ast-grep"
 sub = "outline"
 adds = ["--no-ignore", "global", "--no-ignore", "exclude"]
+adds_last = ["--globs", "!.git"]
 about = "list the symbols in files; each top-level symbol is one result"
 counts = "json-items"
 # `--view` changes how the text is laid out, not which symbols are listed.
