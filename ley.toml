@@ -231,6 +231,8 @@ name = "one field per line"
 run = "rg -l -F '# breaks: layout' fixtures/invalid"
 shows = "the broken ledgers that show what this rule refuses"
 count = 1
+since = 2026-11-11
+sha = "3e8f872a5401"
 
 [[row]]
 name = "the same for every reader"
