@@ -1,0 +1,6 @@
+# breaks: source
+# `on` is a date, written without quotes.
+[[row]]
+name = "Quillon"
+is = "the codename for the nightly billing run"
+said = [{ by = "maintainer", on = "2026-11-10" }]

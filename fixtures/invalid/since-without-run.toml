@@ -1,0 +1,7 @@
+# breaks: since
+# `since` says how long a command has shown this. There is no command. A definition is dated by its sources.
+[[row]]
+name = "Quillon"
+is = "the codename for the nightly billing run"
+said = [{ by = "maintainer", on = 2026-11-10 }]
+since = 2026-11-10

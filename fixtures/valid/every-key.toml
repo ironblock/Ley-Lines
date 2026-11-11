@@ -1,0 +1,13 @@
+# A row may say what a thing is and how to see it. This one carries every key.
+[[row]]
+name = "stage"
+is = "one step of the billing run"
+said = [
+  { by = "maintainer", on = 2026-11-10 },
+  { by = "the platform team", on = 2026-11-12 },
+]
+run = "rg -n -F '[stage.' pipeline.toml"
+shows = "the name of each stage"
+count = 3
+since = 2026-03-14
+sha = "0123456789ab"

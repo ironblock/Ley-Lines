@@ -1,0 +1,6 @@
+# The `=` signs may be lined up. `ley` does not mind either way, and `ley since` writes its two lines to match.
+[[row]]
+name  = "stage"
+run   = "rg -n -F '[stage.' pipeline.toml"
+shows = "the name of each stage"
+count = 3

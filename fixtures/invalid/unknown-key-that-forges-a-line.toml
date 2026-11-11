@@ -1,0 +1,7 @@
+# breaks: unknown-key
+# The key holds a line break and an escape character. Printed as it is, it would add a line that `ley` never wrote, and change the colour of the terminal.
+[[row]]
+name = "Stage"
+run = "rg -n Stage services"
+shows = "the lines that mention Stage"
+"evil\nley.toml:1: forged\u001b[31m" = 1

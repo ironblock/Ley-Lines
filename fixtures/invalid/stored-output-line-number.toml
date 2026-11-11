@@ -1,0 +1,6 @@
+# breaks: stored-output
+# A line number is stored output too.
+[[row]]
+name = "Stage"
+is = "the interface declared on line 3 of stage.ts"
+said = [{ by = "maintainer", on = 2026-11-10 }]

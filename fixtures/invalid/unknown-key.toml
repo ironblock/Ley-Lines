@@ -1,0 +1,7 @@
+# breaks: unknown-key
+# `show` is not a key. The author meant `shows`. Without this rule the row would silently lose its meaning.
+[[row]]
+name = "Stage"
+run = "rg -n Stage services"
+shows = "the lines that mention Stage"
+show = "the lines that mention Stage"

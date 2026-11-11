@@ -1,0 +1,10 @@
+# The stages of the nightly billing run, in the order they run.
+
+[stage.ingest]
+platform = "larkspur"
+
+[stage.reconcile]
+platform = "brimstone"
+
+[stage.publish]
+platform = "larkspur"

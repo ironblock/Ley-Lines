@@ -1,0 +1,11 @@
+# Several rows may share a name. `ley show stage` prints both.
+[[row]]
+name = "stage"
+run = "rg -n -F '[stage.' pipeline.toml"
+shows = "the name of each stage"
+count = 3
+
+[[row]]
+name = "stage"
+run = "rg -n 'interface Stage' services"
+shows = "the line that declares interface Stage"

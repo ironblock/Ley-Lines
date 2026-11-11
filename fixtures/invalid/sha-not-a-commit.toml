@@ -1,0 +1,8 @@
+# breaks: since
+# `sha` is 7 to 40 characters of 0-9 and a-f.
+[[row]]
+name = "Stage"
+run = "rg -n Stage services"
+shows = "the lines that mention Stage"
+since = 2026-11-10
+sha = "HEAD~3"

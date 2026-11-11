@@ -1,0 +1,14 @@
+# Comments and blank lines may sit between rows.
+  # what things are
+
+[[row]]
+name = "Quillon"
+is = "the codename for the nightly billing run"
+said = [{ by = "maintainer", on = 2026-11-10 }]
+
+  # where things are
+
+[[row]]
+name = "Quillon"
+run = "rg -n -F Quillon docs/glossary.md"
+shows = "the glossary line that defines Quillon"

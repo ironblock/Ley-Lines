@@ -1,0 +1,6 @@
+# A count of 0 is a fact too: the command shows that something is not there.
+[[row]]
+name = "legacy billing"
+run = "rg -l -F legacy_billing services"
+shows = "the files that still mention the old billing code"
+count = 0
