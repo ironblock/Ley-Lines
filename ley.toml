@@ -134,7 +134,9 @@ sha = "e605d06fb4f4"
 [[row]]
 name = "since"
 run = "ast-grep outline --items structure --type struct --match '^Tree$' --view signatures src"
-shows = "the struct that holds one commit's files in a temporary directory, so that the walk writes nothing into the repository"
+shows = "the struct that holds one commit's files in a temporary directory"
+since = 2026-11-10
+sha = "e605d06fb4f4"
 
 [[row]]
 name = "hidden character"
@@ -145,6 +147,8 @@ said = [{ by = "Claude Fable 5.2", on = 2026-11-11 }]
 name = "hidden character"
 run = "ast-grep outline --type function --match '^hidden$' --view signatures src"
 shows = "the function that says which characters a ledger's text may not hold"
+since = 2026-11-11
+sha = "0077862d8869"
 
 [[row]]
 name = "rule"
@@ -247,7 +251,7 @@ run = "rg -l -F '# breaks: layout' fixtures/invalid"
 shows = "the broken ledgers that show what this rule refuses"
 count = 2
 since = 2026-11-11
-sha = "3e8f872a5401"
+sha = "0077862d8869"
 
 [[row]]
 name = "the same for every reader"
