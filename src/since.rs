@@ -357,8 +357,8 @@ pub fn since(ledger: &Ledger, limit: Duration) -> Result<Walk, String> {
 }
 
 /// The commits from the current one back along the first parent, each with the
-/// day it was committed. Git is asked once, with a command whose output a user's
-/// settings do not change.
+/// day it was committed. Git lists them with one command, whose output a user's
+/// settings do not change. When that fails, git is asked why.
 fn history(root: &Path) -> Result<Vec<(String, Date)>, String> {
     let listed = match git(root, &["rev-list", "--first-parent", "--timestamp", "HEAD"]) {
         Ok(listed) => listed,
@@ -366,9 +366,21 @@ fn history(root: &Path) -> Result<Vec<(String, Date)>, String> {
             // With no commit on any branch, there is nothing wrong: nothing is there yet.
             let none_at_all =
                 git(root, &["rev-list", "--max-count=1", "--all"]).is_ok_and(|any| any.is_empty());
-            return Err(match none_at_all {
-                true => "the repository has no commits yet".into(),
-                false => format!("git could not list the commits of this repository\n{said}"),
+            // A new branch can have no commit while other branches have some.
+            let new_branch = git(root, &["symbolic-ref", "--quiet", "HEAD"])
+                .ok()
+                .filter(|head| {
+                    git(root, &["show-ref", "--verify", "--quiet", head.trim()]).is_err()
+                });
+            return Err(match (none_at_all, new_branch) {
+                (true, _) => "the repository has no commits yet".into(),
+                (false, Some(head)) => format!(
+                    "the branch `{}` has no commits yet",
+                    head.trim().trim_start_matches("refs/heads/")
+                ),
+                (false, None) => {
+                    format!("git could not list the commits of this repository\n{said}")
+                }
             });
         }
     };
