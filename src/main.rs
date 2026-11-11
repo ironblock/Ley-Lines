@@ -4,8 +4,8 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use ley_lines::ledger::{self, Ledger, LoadError};
-use ley_lines::since::{Change, Found};
-use ley_lines::text::count;
+use ley_lines::since::{Change, Found, Stopped};
+use ley_lines::text::{count, shown};
 use ley_lines::{check, rules, run, shape, show, since};
 
 const THE_FILE: &str = "\
@@ -100,13 +100,17 @@ enum Cmd {
     /// Walks back through git history from the current commit, running each
     /// row's command as it is written now, until the row stops holding. Writes
     /// the date and commit of the oldest commit at which it held into the
-    /// ledger, as `since` and `sha`. The history is read in a temporary working
-    /// tree; your own files are not touched, apart from the ledger.
+    /// ledger, as `since` and `sha`. The date is the commit's day in UTC.
+    ///
+    /// Each commit's files are put into a temporary directory. Nothing is
+    /// written into the repository, none of its hooks run, and your own files
+    /// are not touched, apart from the ledger.
     ///
     /// A recorded date moves earlier when more history is read. It moves later
-    /// only when the walk finds a commit, after that date, at which the row did
-    /// not hold. A shallow clone or a squashed history does not move it. A row
-    /// that does not hold at the current commit loses its date.
+    /// only when the history has the recorded commit and shows a commit after
+    /// it at which the row did not hold. A shallow clone or a squashed history
+    /// does not move it. A row that does not hold at the current commit loses
+    /// its date.
     Since {
         /// Print what would be recorded, and write nothing
         #[arg(long)]
@@ -123,7 +127,9 @@ fn main() -> ExitCode {
     match run(cli) {
         Ok(code) => code,
         Err(message) => {
-            eprintln!("ley: {message}");
+            // A message may quote a file name. None of it is printed raw.
+            let lines: Vec<String> = message.lines().map(shown).collect();
+            eprintln!("ley: {}", lines.join("\n     "));
             ExitCode::from(2)
         }
     }
@@ -208,7 +214,7 @@ fn show_rows(ledger: &Ledger, names: &[String]) -> ExitCode {
     for name in names {
         let rows = show::select(ledger, name);
         if rows.is_empty() {
-            eprintln!("ley: no row has a name containing \"{name}\"");
+            eprintln!("ley: no row has a name containing \"{}\"", shown(name));
             code = ExitCode::FAILURE;
             continue;
         }
@@ -248,31 +254,48 @@ fn record_since(ledger: &Ledger, dry_run: bool) -> Result<ExitCode, String> {
             Found::Since {
                 since,
                 commits,
-                broke,
+                stopped,
                 ..
             } => {
                 let sha = since.sha.as_deref().unwrap_or("");
-                let reach = match broke {
-                    None => "the oldest commit here".to_string(),
-                    Some(_) => format!("held at {}", count(*commits as u64, "commit", "commits")),
+                let reach = match stopped {
+                    Stopped::NoOlderCommit => "the oldest commit here".to_string(),
+                    _ => format!("held at {}", count(*commits as u64, "commit", "commits")),
                 };
                 let found = format!("true since at least {} (commit {sha}, {reach})", since.date);
                 match &change {
                     Change::New(_) => println!("{at}: {found}: new"),
                     Change::Earlier(_) => println!("{at}: {found}: moved earlier"),
-                    Change::Unchanged => println!("{at}: {found}: unchanged"),
                     Change::Later { broke, .. } => println!(
                         "{at}: {found}: moved later, because the row did not hold at commit {}",
                         broke.sha
                     ),
+                    // The date a row keeps may be older than the commit beside it.
+                    Change::Unchanged => println!(
+                        "{at}: true since at least {} (commit {sha}, {reach}): unchanged",
+                        recorded.map_or(since.date, |recorded| recorded.date)
+                    ),
                     Change::Commit(kept) => println!(
-                        "{at}: true since at least {}: the date is kept, and the commit is now {sha}, the earliest one in this history",
+                        "{at}: true since at least {}: the date is kept, and the commit is now {sha}, the earliest one here at which the row is known to hold",
                         kept.date
                     ),
                     Change::Kept => println!(
-                        "{at}: the recorded date is kept: this clone holds only part of the history"
+                        "{at}: the recorded date is kept: {}",
+                        match stopped {
+                            Stopped::NoOlderCommit => "this clone holds only part of the history",
+                            Stopped::Broke(_) =>
+                                "the row is not seen to break after the commit it records",
+                            Stopped::CouldNotRun { .. } => "the walk could not go further back",
+                        }
                     ),
                     Change::Removed | Change::Nothing => {}
+                }
+                if let Stopped::CouldNotRun { at: commit, why } = stopped {
+                    could_not_run += 1;
+                    println!(
+                        "    the walk stopped at commit {}, where the command could not run: {why}",
+                        commit.sha
+                    );
                 }
             }
         }

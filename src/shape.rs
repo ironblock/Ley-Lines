@@ -109,7 +109,9 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
         }
     };
     let title = shape.title();
-    let rest = &words[if shape.sub.is_some() { 2 } else { 1 }..];
+    // Where the row's own flags and paths start: after the program and its subcommand.
+    let at = if shape.sub.is_some() { 2 } else { 1 };
+    let rest = &words[at..];
 
     let mut seen: Vec<&str> = Vec::new();
     let mut positional: Vec<&str> = Vec::new();
@@ -181,7 +183,6 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
 
     // Added flags go right after the program and its subcommand, before any `--`.
     let mut plain = words.to_vec();
-    let at = if shape.sub.is_some() { 2 } else { 1 };
     plain.splice(at..at, shape.adds.iter().cloned());
     let (argv, plain) = match shape.counts {
         Counts::Lines => (plain, None),

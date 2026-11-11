@@ -95,7 +95,7 @@ A ledger follows ten rules. `ley` enforces the ones a program can enforce. Each 
 7. **the same for every reader.** A command has no shell syntax and only relative paths, so it shows every reader the same thing. `rg Stage` breaks this rule: with no path, `rg` searches standard input when that is a pipe.
 8. **exact name, wide search.** A command names the thing exactly and searches as much of the place as it can. Then it still finds the thing after a file moves.
 9. **fail loud.** A row that could not be run is reported as such. It is never counted as holding, and never passed over.
-10. **earliest known.** A row may carry the earliest date, and commit, at which it is known to have held. `ley since` finds them by walking back through history. With more history, the date can move earlier. It moves later only when the walk finds a commit, after that date, at which the row did not hold. A shallow clone or a squashed history does not move it.
+10. **earliest known.** A row may carry the earliest date, and commit, at which it is known to have held. `ley since` finds them by walking back through history. With more history, the date can move earlier. It moves later in one case only: the history has the recorded commit, and shows a commit after it at which the row did not hold. A shallow clone or a squashed history does not move it. Neither does a command that could not run at an older commit.
 
 ## The file
 
@@ -121,9 +121,13 @@ shows = "…"
 | `run` | A command. |
 | `shows` | What kind of thing the command shows, not the thing itself. `ley` prints "If you run *run*, it will show you *shows*." |
 | `count` | How many results the command shows. It is 1 when left out. It may be 0: the command then shows that something is not there. |
-| `since`, `sha` | The earliest known date and commit at which the row held. `ley since` writes them. |
+| `since`, `sha` | The earliest known date and commit at which the row held. `ley since` writes them. The date is the commit's day in UTC. |
 
-A row has `is`, or `run`, or both. What kind of row it is follows from the keys it carries. A row is a `[[row]]` block. The `=` signs may be lined up or not: `ley` does not mind, and `ley since` writes its two lines to match the block.
+A row has `is`, or `run`, or both. What kind of row it is follows from the keys it carries.
+
+A row is a `[[row]]` block, and every field of the row sits inside it, on a line of its own. TOML has other ways to write the same rows: all the fields on one line, or the sources in a `[[row.said]]` block of their own. `ley` refuses both, so a row is written one way only. The `=` signs may be lined up or not: `ley` does not mind, and `ley since` writes its two lines to match the block.
+
+Text is one line. It holds no control character, and no character that hides or reorders what a reader sees. So a row cannot print as two rows, and a command cannot read as another command.
 
 A result is one line for `rg`, one match for `ast-grep run` and `ast-grep scan`, and one symbol for `ast-grep outline`.
 
@@ -151,6 +155,10 @@ A result is one line for `rg`, one match for `ast-grep run` and `ast-grep scan`,
 | not checked | The command fits no shape, so `ley` did not run it. |
 
 It exits with 0 when every command that ran holds. With `--strict`, a row that was not checked also counts against it. A row with no command has nothing to run, and never fails.
+
+`ley since` reads the repository and writes one file, the ledger. It puts each commit's files into a temporary directory, through an index of its own. It registers no working tree and runs none of the repository's hooks. Your files, your index and your HEAD stay as they were. If it is stopped half way, what remains is that temporary directory, and nothing in the repository.
+
+When a command could not run at an older commit, the walk stops there for that row and says so. That is not a commit at which the row did not hold, so it moves no date.
 
 ## What `ley check` will run
 

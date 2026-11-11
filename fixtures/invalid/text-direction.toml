@@ -1,0 +1,6 @@
+# breaks: text
+# The command holds a character that turns the text after it around. A reader would see `rg -n Stage services`, and `ley check` would run something else.
+[[row]]
+name = "Stage"
+run = "rg -n ‮secivres egatS"
+shows = "the lines that mention Stage"

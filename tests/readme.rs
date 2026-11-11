@@ -3,14 +3,12 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 
 use ley_lines::{command, rules};
 
-fn repository() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-}
+mod common;
+use common::{have, ley_command, repository};
 
 fn readme() -> String {
     fs::read_to_string(repository().join("README.md")).unwrap()
@@ -34,17 +32,9 @@ fn blocks(text: &str, language: &str) -> Vec<Vec<String>> {
     found
 }
 
-fn installed(program: &str) -> bool {
-    let found = Command::new(program).arg("--version").output().is_ok();
-    if !found && std::env::var_os("LEY_TEST_REQUIRE_TOOLS").is_some() {
-        panic!("`{program}` is not installed, and LEY_TEST_REQUIRE_TOOLS is set");
-    }
-    found
-}
-
 #[test]
 fn console_blocks_show_what_ley_really_prints() {
-    let have_tools = installed("rg") && installed("ast-grep");
+    let have_tools = have(&["rg", "ast-grep"]);
     let mut compared = 0;
     for block in blocks(&readme(), "console") {
         let mut dir: PathBuf = repository().to_path_buf();
@@ -78,11 +68,7 @@ fn console_blocks_show_what_ley_really_prints() {
                         eprintln!("skipped: `{typed}` needs rg and ast-grep");
                         continue;
                     }
-                    let output = Command::new(env!("CARGO_BIN_EXE_ley"))
-                        .args(&words[1..])
-                        .current_dir(&dir)
-                        .output()
-                        .unwrap();
+                    let output = ley_command(&dir).args(&words[1..]).output().unwrap();
                     let printed = String::from_utf8_lossy(&output.stdout);
                     assert_eq!(
                         printed.trim_end(),

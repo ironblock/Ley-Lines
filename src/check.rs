@@ -18,8 +18,9 @@ pub enum Status {
     Differs { got: u64, note: Option<String> },
     /// The row holds, and its `shows` repeats this text, which the command printed.
     Restates(String),
-    /// The command fits a shape, and could not run or said it failed.
-    CouldNotRun(String),
+    /// The command fits a shape, and could not run or said it failed. `ran` is true
+    /// when the program ran to its end and said so itself.
+    CouldNotRun { why: String, ran: bool },
     /// The command fits no shape, so it was not run.
     NotChecked(String),
 }
@@ -31,29 +32,22 @@ pub fn fit(pointer: &Pointer) -> Result<Plan, String> {
 
 /// Run one pointer's command in `dir` and compare the count. Never returns `Restates`.
 pub fn status(pointer: &Pointer, dir: &Path, limit: Duration) -> Status {
-    match fit(pointer) {
-        Ok(plan) => counted(pointer, &plan, dir, limit),
-        Err(why) => Status::NotChecked(why),
-    }
+    counted(pointer, dir, limit).0
 }
 
-fn counted(pointer: &Pointer, plan: &Plan, dir: &Path, limit: Duration) -> Status {
-    counted_and_printed(pointer, plan, dir, limit).0
-}
-
-/// The status of the count, and, when the row holds, the text the counting run printed.
-fn counted_and_printed(
-    pointer: &Pointer,
-    plan: &Plan,
-    dir: &Path,
-    limit: Duration,
-) -> (Status, Option<String>) {
-    match run::run(plan, dir, limit) {
+/// The status of the count. When the row holds, also the plan that ran and the text
+/// its counting run printed.
+fn counted(pointer: &Pointer, dir: &Path, limit: Duration) -> (Status, Option<(Plan, String)>) {
+    let plan = match fit(pointer) {
+        Ok(plan) => plan,
+        Err(why) => return (Status::NotChecked(why), None),
+    };
+    match run::run(&plan, dir, limit) {
         Outcome::Count {
             results, printed, ..
-        } if results == pointer.count => (Status::Holds, Some(printed)),
+        } if results == pointer.count => (Status::Holds, Some((plan, printed))),
         Outcome::Count { results, note, .. } => (Status::Differs { got: results, note }, None),
-        Outcome::Failed(why) => (Status::CouldNotRun(why), None),
+        Outcome::Failed { why, ran } => (Status::CouldNotRun { why, ran }, None),
     }
 }
 
@@ -179,21 +173,16 @@ pub fn check(ledger: &Ledger, verbose: bool, limit: Duration) -> (Vec<String>, T
         let at = |word: &str| format!("{file}:{}: {word}: \"{}\"", row.line, row.name);
         let mut detail = vec![format!("    {}", pointer.run)];
 
-        let status = match fit(pointer) {
-            Err(why) => Status::NotChecked(why),
-            Ok(plan) => match counted_and_printed(pointer, &plan, dir, limit) {
-                (Status::Holds, printed) => {
-                    // Compare `shows` with the text a reader would see. For rg that is
-                    // what the counting run printed. For ast-grep, `ley` counted JSON,
-                    // so the command runs once more without it.
-                    let seen = run::plain(&plan, dir, limit).or(printed);
-                    match seen.and_then(|text| restated(pointer, &row.name, &text)) {
-                        Some(text) => Status::Restates(text),
-                        None => Status::Holds,
-                    }
-                }
-                (other, _) => other,
+        let status = match counted(pointer, dir, limit) {
+            // The count holds. Compare `shows` with the text a reader would see.
+            (Status::Holds, Some((plan, printed))) => match run::seen(&plan, printed, dir, limit) {
+                Ok(text) => match restated(pointer, &row.name, &text) {
+                    Some(text) => Status::Restates(text),
+                    None => Status::Holds,
+                },
+                Err(why) => Status::CouldNotRun { why, ran: false },
             },
+            (other, _) => other,
         };
 
         match status {
@@ -221,7 +210,7 @@ pub fn check(ledger: &Ledger, verbose: bool, limit: Duration) -> (Vec<String>, T
                     at("restates")
                 ));
             }
-            Status::CouldNotRun(why) => {
+            Status::CouldNotRun { why, .. } => {
                 tally.could_not_run += 1;
                 lines.push(format!("{}: {why}", at("could not run")));
             }

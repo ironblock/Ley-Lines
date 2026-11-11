@@ -4,64 +4,13 @@
 //! Set LEY_TEST_REQUIRE_TOOLS=1 to make a missing program a failure instead.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::path::Path;
+use std::process::Command;
 
 use ley_lines::ledger;
 
-const LEY: &str = env!("CARGO_BIN_EXE_ley");
-
-fn repository() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-}
-
-/// True when every program is installed. Otherwise the test should return at once.
-fn have(programs: &[&str]) -> bool {
-    for program in programs {
-        let found = Command::new(program).arg("--version").output().is_ok();
-        if !found {
-            if std::env::var_os("LEY_TEST_REQUIRE_TOOLS").is_some() {
-                panic!("`{program}` is not installed, and LEY_TEST_REQUIRE_TOOLS is set");
-            }
-            eprintln!("skipped: `{program}` is not installed");
-            return false;
-        }
-    }
-    true
-}
-
-fn ley(dir: &Path, args: &[&str]) -> Output {
-    Command::new(LEY)
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("the ley binary runs")
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn copy(from: &Path, to: &Path) {
-    fs::create_dir_all(to).unwrap();
-    for entry in fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let target = to.join(entry.file_name());
-        if entry.file_type().unwrap().is_dir() {
-            copy(&entry.path(), &target);
-        } else {
-            fs::copy(entry.path(), target).unwrap();
-        }
-    }
-}
-
-/// A private copy of the example, so a test can change it.
-fn example() -> (tempfile::TempDir, PathBuf) {
-    let holder = tempfile::tempdir().unwrap();
-    let dir = holder.path().join("pipeline");
-    copy(&repository().join("examples/pipeline"), &dir);
-    (holder, dir)
-}
+mod common;
+use common::{History, example, have, ley, ley_command, repository, stdout};
 
 #[test]
 fn this_repositorys_own_ledger_holds() {
@@ -209,9 +158,8 @@ fn a_missing_program_is_reported_and_never_passed_over() {
     let (holder, dir) = example();
     let empty = holder.path().join("no-programs");
     fs::create_dir(&empty).unwrap();
-    let output = Command::new(LEY)
+    let output = ley_command(&dir)
         .arg("check")
-        .current_dir(&dir)
         .env("PATH", &empty)
         .output()
         .unwrap();
@@ -268,69 +216,6 @@ fn with_no_ledger_ley_says_so() {
     let output = ley(holder.path(), &["show"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("no ley.toml in"));
-}
-
-/// A small repository with a known history.
-struct History {
-    _holder: tempfile::TempDir,
-    dir: PathBuf,
-}
-
-impl History {
-    fn new() -> History {
-        let holder = tempfile::tempdir().unwrap();
-        let dir = holder.path().join("place");
-        fs::create_dir_all(dir.join("src")).unwrap();
-        let history = History {
-            _holder: holder,
-            dir,
-        };
-        history.git(&["init", "--quiet", "--initial-branch=main"], "");
-        history
-    }
-
-    fn git(&self, args: &[&str], date: &str) -> String {
-        // Git here is about this test's own directory, whatever the environment says.
-        let mut command = Command::new("git");
-        for name in ley_lines::since::GIT_PLACE {
-            command.env_remove(name);
-        }
-        let output = command
-            .args([
-                "-c",
-                "user.name=ley",
-                "-c",
-                "user.email=ley@example.invalid",
-            ])
-            .args(["-c", "commit.gpgsign=false"])
-            .args(args)
-            .current_dir(&self.dir)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_AUTHOR_DATE", date)
-            .env("GIT_COMMITTER_DATE", date)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "git {args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
-    }
-
-    /// Write a file, commit everything on the given day, and return the commit.
-    fn commit(&self, file: &str, text: &str, day: &str) -> String {
-        fs::write(self.dir.join(file), text).unwrap();
-        self.git(&["add", "--all"], "");
-        // `day` is a day, or a day and a time.
-        let when = match day.contains('T') {
-            true => day.to_string(),
-            false => format!("{day}T12:00:00+00:00"),
-        };
-        self.git(&["commit", "--quiet", "--message", day], &when);
-        self.git(&["rev-parse", "HEAD"], "")
-    }
 }
 
 const HISTORY_LEDGER: &str = "\
@@ -420,9 +305,9 @@ Recorded 2 rows in ley.toml.
         text
     );
 
-    // The walk used a temporary working tree. It is gone, and no other file changed.
+    // The walk registered no working tree, and no other file changed.
     assert_eq!(history.git(&["worktree", "list"], "").lines().count(), 1);
-    assert_eq!(history.git(&["status", "--porcelain"], ""), "M ley.toml");
+    assert_eq!(history.git(&["status", "--porcelain"], ""), " M ley.toml");
 }
 
 /// A ledger with one row, for the tests below. `fields` is the row's lines.
@@ -464,9 +349,8 @@ fn a_personal_ripgrep_configuration_changes_nothing() {
     let config = holder.path().join("ripgreprc");
     fs::write(&config, "--context=1\n--smart-case\n").unwrap();
     one_row(&dir, QUILLON);
-    let output = Command::new(LEY)
+    let output = ley_command(&dir)
         .arg("check")
-        .current_dir(&dir)
         .env("RIPGREP_CONFIG_PATH", &config)
         .output()
         .unwrap();
@@ -528,18 +412,7 @@ fn since_keeps_a_recorded_date_in_a_shallow_clone() {
 
     // A clone with one commit sees the row hold from 2026-03-01. That is no reason
     // to say the fact is newer than it is.
-    let shallow = history.dir.with_file_name("shallow");
-    let url = format!("file://{}", history.dir.display());
-    let cloned = Command::new("git")
-        .args(["clone", "--quiet", "--depth", "1", &url])
-        .arg(&shallow)
-        .output()
-        .unwrap();
-    assert!(
-        cloned.status.success(),
-        "{}",
-        String::from_utf8_lossy(&cloned.stderr)
-    );
+    let shallow = history.clone_to("shallow", &["--depth", "1"]);
     let output = ley(&shallow, &["since"]);
     assert_eq!(
         stdout(&output),
@@ -591,12 +464,27 @@ fn since_keeps_the_date_when_the_recorded_commit_is_gone() {
     assert_eq!(
         printed,
         format!(
-            "ley.toml:1: \"alpha\": true since at least 2026-01-15: the date is kept, and the commit is now {}, the earliest one in this history\nRecorded 1 row in ley.toml.\n",
+            "ley.toml:1: \"alpha\": true since at least 2026-01-15: the date is kept, and the commit is now {}, the earliest one here at which the row is known to hold\nRecorded 1 row in ley.toml.\n",
             &squashed[..12]
         )
     );
     let text = fs::read_to_string(history.dir.join("ley.toml")).unwrap();
     assert_eq!(text, alpha_ledger(&recorded("2026-01-15", &squashed)));
+
+    // From a third review: the next run must find nothing left to do. The row keeps
+    // a date that is older than its commit, and that is not a difference.
+    let printed = stdout(&ley(&history.dir, &["since"]));
+    assert_eq!(
+        printed,
+        format!(
+            "ley.toml:1: \"alpha\": true since at least 2026-01-15 (commit {}, held at 1 commit): unchanged\nNothing to record.\n",
+            &squashed[..12]
+        )
+    );
+    assert_eq!(
+        fs::read_to_string(history.dir.join("ley.toml")).unwrap(),
+        text
+    );
 }
 
 #[test]
@@ -619,6 +507,7 @@ fn since_removes_the_date_of_a_row_that_no_longer_holds() {
     assert_eq!(text, alpha_ledger(""));
 }
 
+#[cfg(unix)]
 #[test]
 fn since_says_so_when_a_program_could_not_run() {
     if !have(&["rg", "git"]) {
@@ -631,17 +520,9 @@ fn since_says_so_when_a_program_could_not_run() {
 
     // A PATH that has git and nothing else.
     let bin = history.dir.with_file_name("only-git");
-    fs::create_dir(&bin).unwrap();
-    let git = Command::new("sh")
-        .args(["-c", "command -v git"])
-        .output()
-        .unwrap();
-    let git = String::from_utf8_lossy(&git.stdout).trim().to_string();
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&git, bin.join("git")).unwrap();
-    let output = Command::new(LEY)
+    common::path_with_git_and(&bin, &[]);
+    let output = ley_command(&history.dir)
         .arg("since")
-        .current_dir(&history.dir)
         .env("PATH", &bin)
         .output()
         .unwrap();
@@ -671,9 +552,8 @@ fn since_run_from_a_git_hook_leaves_the_users_checkout_alone() {
     let head = history.git(&["rev-parse", "HEAD"], "");
 
     // Git sets these when it runs a hook. They name the user's own repository.
-    let output = Command::new(LEY)
+    let output = ley_command(&history.dir)
         .args(["since", "--dry-run"])
-        .current_dir(&history.dir)
         .env("GIT_DIR", history.dir.join(".git"))
         .env("GIT_INDEX_FILE", ".git/index")
         .env("GIT_PREFIX", "")
@@ -749,7 +629,7 @@ fn a_personal_list_of_ignored_files_changes_nothing() {
     personal(&mut alone);
     assert_eq!(String::from_utf8_lossy(&alone.output().unwrap().stdout), "");
     // ...and `ley check` still counts what the repository holds.
-    let mut check = Command::new(LEY);
+    let mut check = ley_command(&history.dir);
     check.arg("check");
     personal(&mut check);
     assert_eq!(stdout(&check.output().unwrap()), "1 row: 1 holds.\n");
@@ -779,4 +659,387 @@ fn since_needs_a_git_repository() {
     let output = ley(&dir, &["since"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("is not in a git repository"));
+}
+
+// The next tests come from a third review.
+
+/// A ledger of several rows, for the tests below. Each entry is one row's lines.
+fn rows(dir: &Path, rows: &[&str]) {
+    let blocks: Vec<String> = rows.iter().map(|row| format!("[[row]]\n{row}\n")).collect();
+    fs::write(dir.join("ley.toml"), blocks.join("\n")).unwrap();
+}
+
+#[test]
+fn a_path_that_is_not_there_is_reported_and_never_counted_as_nothing() {
+    if !have(&["rg", "ast-grep"]) {
+        return;
+    }
+    // Given a path that does not exist, ast-grep prints nothing and exits the way it
+    // does when it finds no match. A row that says `count = 0` must not hold for it.
+    let (_holder, dir) = example();
+    rows(
+        &dir,
+        &[
+            "name = \"a\"\nrun = \"rg -n Stage nowhere\"\nshows = \"the lines that mention Stage\"\ncount = 0",
+            "name = \"b\"\nrun = \"ast-grep run -p 'interface $A { $$$ }' nowhere\"\nshows = \"each interface\"\ncount = 0",
+            "name = \"c\"\nrun = \"ast-grep scan --inline-rules '{id: r, language: ts, rule: {kind: interface_declaration}}' nowhere\"\nshows = \"each interface\"\ncount = 0",
+            "name = \"d\"\nrun = \"ast-grep outline --type interface nowhere\"\nshows = \"each interface\"\ncount = 0",
+        ],
+    );
+    let output = ley(&dir, &["check"]);
+    let printed = stdout(&output);
+    assert_eq!(output.status.code(), Some(1), "{printed}");
+    assert!(printed.ends_with("4 rows: 4 could not run.\n"), "{printed}");
+    for name in ["a", "b", "c", "d"] {
+        assert!(
+            printed.contains(&format!("could not run: \"{name}\": ")),
+            "{printed}"
+        );
+    }
+}
+
+#[test]
+fn a_rule_that_is_switched_off_matches_nothing() {
+    if !have(&["ast-grep"]) {
+        return;
+    }
+    // `ley` passes no flag that changes a rule's severity. One such flag would make
+    // the "error(s) found" line go away, and would also switch this rule back on.
+    let (_holder, dir) = example();
+    one_row(
+        &dir,
+        r#"name = "interface"
+run = "ast-grep scan --inline-rules '{id: r, language: ts, severity: off, rule: {kind: interface_declaration}}' services"
+shows = "each interface under services"
+count = 0"#,
+    );
+    assert_eq!(stdout(&ley(&dir, &["check"])), "1 row: 1 holds.\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_second_run_that_fails_is_reported_and_not_passed_over() {
+    if !have(&["ast-grep", "git"]) {
+        return;
+    }
+    // For an ast-grep row `ley` counts JSON, then runs the command once more to see
+    // the text a reader would see. This ast-grep fails on that second run.
+    let (holder, dir) = example();
+    let bin = holder.path().join("bin");
+    let script = format!(
+        "#!/bin/sh\ncase \" $* \" in\n*\" --json=stream \"*) exec '{}' \"$@\" ;;\n*) echo 'Error: no plain text today' >&2; exit 2 ;;\nesac\n",
+        common::path_of("ast-grep")
+    );
+    common::path_with_git_and(&bin, &[("ast-grep", &script)]);
+    one_row(
+        &dir,
+        "name = \"stage\"\nrun = \"ast-grep outline --type interface --match '^Stage$' services\"\nshows = \"the interface that every stage implements\"",
+    );
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let output = ley_command(&dir)
+        .arg("check")
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        stdout(&output),
+        "ley.toml:1: could not run: \"stage\": ast-grep said: Error: no plain text today\n    ast-grep outline --type interface --match '^Stage$' services\n1 row: 1 could not run.\n"
+    );
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
+fn a_key_cannot_forge_a_line_of_output() {
+    let dir = repository().join("fixtures/invalid");
+    let output = ley(
+        &dir,
+        &["--ledger", "unknown-key-that-forges-a-line.toml", "check"],
+    );
+    let printed = stdout(&output);
+    assert_eq!(output.status.code(), Some(1));
+    // One line for the problem and one for the count. The key added none, and no
+    // character that a terminal would act on came through.
+    assert_eq!(printed.lines().count(), 2, "{printed}");
+    assert!(!printed.contains('\u{1b}'), "{printed:?}");
+    assert!(
+        printed.contains("`evil\\u{a}ley.toml:1: forged\\u{1b}[31m` is not a key a row has"),
+        "{printed}"
+    );
+}
+
+#[test]
+fn since_gives_one_answer_whether_or_not_the_old_commit_is_still_there() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("src/other.txt", "other\n", "2026-01-01");
+    // A branch on which the row first holds, and where its date is recorded.
+    history.git(&["switch", "--quiet", "--create", "work"], "");
+    let on_branch = history.commit("src/words.txt", "alpha\n", "2026-01-02");
+    // The main line moves on, then takes the branch as one squashed commit.
+    history.git(&["switch", "--quiet", "main"], "");
+    history.commit("src/more.txt", "more\n", "2026-01-03");
+    history.git(&["merge", "--squash", "--quiet", "work"], "");
+    let ledger = alpha_ledger(&recorded("2026-01-02", &on_branch));
+    let squashed = history.commit("ley.toml", &ledger, "2026-01-05");
+    history.git(&["branch", "--quiet", "-D", "work"], "");
+
+    // This repository still has the branch's commit, though no branch leads to it.
+    // A fresh clone does not have it. Both must say the same thing: the commit
+    // before the squash is no sign that the row broke after it was recorded.
+    let expected = format!(
+        "ley.toml:1: \"alpha\": true since at least 2026-01-02: the date is kept, and the commit is now {}, the earliest one here at which the row is known to hold\n1 row would change.\n",
+        &squashed[..12]
+    );
+    assert_eq!(
+        stdout(&ley(&history.dir, &["since", "--dry-run"])),
+        expected
+    );
+    let fresh = history.clone_to("fresh", &[]);
+    assert!(
+        Command::new("git")
+            .args(["cat-file", "-e", &on_branch])
+            .current_dir(&fresh)
+            .env_remove("GIT_DIR")
+            .output()
+            .is_ok_and(|output| !output.status.success()),
+        "the fresh clone should not have the branch's commit"
+    );
+    assert_eq!(stdout(&ley(&fresh, &["since", "--dry-run"])), expected);
+}
+
+#[test]
+fn since_keeps_a_commit_that_was_merged_in() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("src/other.txt", "other\n", "2026-01-01");
+    history.git(&["switch", "--quiet", "--create", "work"], "");
+    let on_branch = history.commit("src/words.txt", "alpha\n", "2026-01-02");
+    history.git(&["switch", "--quiet", "main"], "");
+    history.commit("src/more.txt", "more\n", "2026-01-03");
+    history.git(
+        &["merge", "--quiet", "--no-ff", "--message", "merge", "work"],
+        "2026-01-04T12:00:00+00:00",
+    );
+    let ledger = alpha_ledger(&recorded("2026-01-02", &on_branch));
+    history.commit("ley.toml", &ledger, "2026-01-05");
+
+    // The walk follows the main line, where the row does not hold before the merge.
+    // The recorded commit is on the line that was merged in. It is in this history,
+    // and the commit where the row does not hold does not come after it.
+    let output = ley(&history.dir, &["since"]);
+    assert_eq!(
+        stdout(&output),
+        "ley.toml:1: \"alpha\": the recorded date is kept: the row is not seen to break after the commit it records\nNothing to record.\n"
+    );
+    assert!(output.status.success());
+    assert_eq!(
+        fs::read_to_string(history.dir.join("ley.toml")).unwrap(),
+        ledger
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn since_does_not_take_a_command_that_could_not_run_for_a_break() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = History::new();
+    let first = history.commit("src/words.txt", "alpha\n", "2026-01-01");
+    let second = history.commit("src/stop-here", "", "2026-02-01");
+    fs::remove_file(history.dir.join("src/stop-here")).unwrap();
+    history.commit("src/words.txt", "alpha\nmore\n", "2026-03-01");
+    let ledger = alpha_ledger(&recorded("2026-01-01", &first));
+    history.commit("ley.toml", &ledger, "2026-04-01");
+
+    // An rg that is stopped before it can answer, at the one commit that has the marker.
+    let bin = history.dir.with_file_name("bin");
+    let script = format!(
+        "#!/bin/sh\nif [ -e src/stop-here ]; then kill -9 $$; fi\nexec '{}' \"$@\"\n",
+        common::path_of("rg")
+    );
+    common::path_with_git_and(&bin, &[("rg", &script)]);
+    let output = ley_command(&history.dir)
+        .arg("since")
+        .env("PATH", &bin)
+        .output()
+        .unwrap();
+    // The row held at every commit, so its date is right. Nothing showed otherwise:
+    // the walk only could not look.
+    assert_eq!(
+        stdout(&output),
+        format!(
+            "ley.toml:1: \"alpha\": the recorded date is kept: the walk could not go further back\n    the walk stopped at commit {}, where the command could not run: `rg` was stopped by a signal\nNothing to record.\n",
+            &second[..12]
+        )
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        fs::read_to_string(history.dir.join("ley.toml")).unwrap(),
+        ledger
+    );
+}
+
+#[test]
+fn since_takes_a_path_that_was_not_there_yet_for_a_break() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    // Before `src/deep` existed, rg says the path is not there. The program ran and
+    // said so: at that commit the row did not hold.
+    let history = History::new();
+    history.commit("src/words.txt", "other\n", "2026-01-01");
+    fs::create_dir_all(history.dir.join("src/deep")).unwrap();
+    let made = history.commit("src/deep/words.txt", "alpha\n", "2026-02-01");
+    one_row(
+        &history.dir,
+        "name = \"alpha\"\nrun = \"rg -n -F alpha src/deep\"\nshows = \"the line with alpha\"",
+    );
+    history.commit_all("2026-03-01");
+    let output = ley(&history.dir, &["since"]);
+    assert_eq!(
+        stdout(&output),
+        format!(
+            "ley.toml:1: \"alpha\": true since at least 2026-02-01 (commit {}, held at 2 commits): new\nRecorded 1 row in ley.toml.\n",
+            &made[..12]
+        )
+    );
+    assert!(output.status.success());
+}
+
+/// A repository with a ledger, and with work in progress that the walk must not
+/// disturb: a staged file, a changed file and a new file.
+fn history_with_work_in_progress(commits: usize) -> History {
+    let history = History::new();
+    for n in 0..commits {
+        let day = format!("2026-01-01T00:{:02}:{:02}+00:00", n / 60, n % 60);
+        history.commit("src/words.txt", &format!("alpha\n{n}\n"), &day);
+    }
+    history.commit("ley.toml", &alpha_ledger(""), "2026-03-01");
+    fs::write(history.dir.join("src/staged.txt"), "staged\n").unwrap();
+    history.git(&["add", "src/staged.txt"], "");
+    fs::write(history.dir.join("src/words.txt"), "alpha\nnot saved\n").unwrap();
+    fs::write(history.dir.join("notes.txt"), "not tracked\n").unwrap();
+    history
+}
+
+#[cfg(unix)]
+#[test]
+fn since_writes_nothing_into_the_repository_and_runs_none_of_its_hooks() {
+    use std::os::unix::fs::PermissionsExt;
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = history_with_work_in_progress(3);
+    // Hooks that leave a mark when git runs them.
+    let log = history.dir.with_file_name("hooks-ran");
+    for hook in ["post-checkout", "post-index-change"] {
+        let path = history.dir.join(".git/hooks").join(hook);
+        let script = format!("#!/bin/sh\necho {hook} >> '{}'\n", log.display());
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let (files, status) = history.snapshot();
+    assert_eq!(
+        status,
+        ["A  src/staged.txt", " M src/words.txt", "?? notes.txt"]
+    );
+    assert!(!log.exists(), "taking the snapshot ran a hook");
+
+    let output = ley(&history.dir, &["since"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout(&output).contains("true since at least 2026-01-01"),
+        "{}",
+        stdout(&output)
+    );
+
+    assert!(
+        !log.exists(),
+        "`ley since` ran: {}",
+        fs::read_to_string(&log).unwrap_or_default()
+    );
+    let (files_after, status_after) = history.snapshot();
+    // The index, HEAD, the branches and every other file git keeps are the same,
+    // byte for byte. No working tree was registered.
+    assert_eq!(
+        files.keys().collect::<Vec<_>>(),
+        files_after.keys().collect::<Vec<_>>()
+    );
+    for (name, bytes) in &files {
+        assert!(files_after[name] == *bytes, ".git/{name} changed");
+    }
+    // The user's work in progress is as it was, and the ledger is the one file that changed.
+    assert_eq!(
+        status_after,
+        [
+            " M ley.toml",
+            "A  src/staged.txt",
+            " M src/words.txt",
+            "?? notes.txt"
+        ]
+    );
+    assert_eq!(
+        fs::read_to_string(history.dir.join("src/words.txt")).unwrap(),
+        "alpha\nnot saved\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_since_that_is_stopped_half_way_leaves_nothing_in_the_repository() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    let history = history_with_work_in_progress(40);
+    let (files, status) = history.snapshot();
+    // The walk's own temporary directory goes here, so the test can look for it.
+    let temporary = history.dir.with_file_name("temporary");
+    fs::create_dir(&temporary).unwrap();
+
+    let mut child = ley_command(&history.dir)
+        .arg("since")
+        .env("TMPDIR", &temporary)
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    // Wait until the walk has put a commit's files into its directory, then stop it
+    // the way a closed terminal or a full machine would: with no chance to tidy up.
+    let started = std::time::Instant::now();
+    let walking = |dir: &Path| {
+        fs::read_dir(dir).is_ok_and(|entries| {
+            entries
+                .flatten()
+                .any(|entry| entry.path().join("tree/src/words.txt").is_file())
+        })
+    };
+    while !walking(&temporary) && started.elapsed().as_secs() < 30 {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let still_running = child.try_wait().unwrap().is_none();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(still_running, "the walk ended before it could be stopped");
+
+    // What is left behind is in the temporary directory, and only there.
+    assert!(walking(&temporary));
+    assert_eq!(history.git(&["worktree", "list"], "").lines().count(), 1);
+    assert!(!history.dir.join(".git/worktrees").exists());
+    let (files_after, status_after) = history.snapshot();
+    assert_eq!(
+        files.keys().collect::<Vec<_>>(),
+        files_after.keys().collect::<Vec<_>>()
+    );
+    for (name, bytes) in &files {
+        assert!(files_after[name] == *bytes, ".git/{name} changed");
+    }
+    assert_eq!(status, status_after);
 }
