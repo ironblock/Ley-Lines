@@ -177,7 +177,7 @@ said = [{ by = "Claude Fable 5.2", on = 2026-11-10 }]
 [[row]]
 name = "example"
 run = "rg -l -F '[[row]]' examples"
-shows = "the ledger of each example"
+shows = "each file under examples that holds a row"
 since = 2026-11-11
 sha = "3e8f872a5401"
 

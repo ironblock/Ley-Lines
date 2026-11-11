@@ -6,6 +6,9 @@
 #
 # `flags` take no value. `options` take one value. `path_options` are options whose
 # value is a path. Every path must be relative and stay inside the ledger's directory.
+# `only_excluding` are options whose value is a glob. Such a glob may only leave
+# files out. List every option that takes a glob there. A test catches `-g` and
+# any option with `glob` in its name. It cannot know one by another name.
 #
 # To add a flag: add it here, and add a line to fixtures/commands.toml.
 # Leave out any flag that writes files, runs another program, changes what one

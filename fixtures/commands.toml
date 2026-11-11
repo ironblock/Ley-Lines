@@ -133,6 +133,11 @@ refused = "is inside `.git`"
 why = "What git keeps in `.git` differs from one clone to the next."
 
 [[command]]
+run = "rg -n -F main .GIT/HEAD"
+refused = "is inside `.git`"
+why = "In capitals too. On many machines `.GIT` is `.git`, and git tracks no path spelled either way."
+
+[[command]]
 run = "rg -l -F ref -g '*' docs"
 refused = "includes files"
 why = "A glob that includes files, even `*`, makes rg search what git ignores and what is hidden, `.git` among it. Those differ from one machine to the next."
@@ -140,7 +145,12 @@ why = "A glob that includes files, even `*`, makes rg search what git ignores an
 [[command]]
 run = "rg --files -g '*.toml' config"
 refused = "includes files"
-why = "The same, for any glob that includes. A path, or a type such as `-t toml`, picks files without reaching past what git ignores."
+why = "The same, for any glob that includes. A path, or a type such as `-t toml`, picks files without reaching past what git ignores. A type also reads hidden files of its kind. It enters no hidden directory, so it stays out of `.git`."
+
+[[command]]
+run = "rg -e -- -g '*' docs"
+refused = "includes files"
+why = "Here `--` is the value of `-e`. So the flags have not ended, and the glob after it is still a glob."
 
 [[command]]
 run = "ast-grep run -p 'foo($A)' --globs '*.js' src"

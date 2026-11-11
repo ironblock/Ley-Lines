@@ -742,7 +742,8 @@ fn stored_output(text: &str) -> Option<String> {
         for (at, _) in word.match_indices(':') {
             // The file's name, without a quote mark or bracket after it.
             let (file, rest) = (&word[..at], &word[at + 1..]);
-            let file = file.trim_end_matches(|c: char| !c.is_alphanumeric());
+            // A full stop stays: `D.C.:5` names no file.
+            let file = file.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '.');
             let ending = file
                 .rsplit_once('.')
                 .map(|(_, end)| end.to_ascii_lowercase());
@@ -958,7 +959,14 @@ mod tests {
                 Some("(Dockerfile.prod:3)"),
             ),
             ("line 12 of the glossary", Some("line 12")),
+            ("the entry at [stage.ts]:14", Some("[stage.ts]:14")),
+            ("see **stage.ts**:14 for it", Some("**stage.ts**:14")),
+            ("see _stage.ts_:14 for it", Some("_stage.ts_:14")),
+            ("the entry at stage.ts,:14", Some("stage.ts,:14")),
             // Not positions:
+            // An abbreviation that ends in a full stop names no file.
+            ("the office in D.C.:5 on the plan", None),
+            ("the depot in N.H.:3", None),
             ("the run at 10:30 each night", None),
             ("the page at https://example.org:8080/x", None),
             ("the proxy that listens on billing.internal:8443", None),

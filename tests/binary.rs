@@ -1271,6 +1271,80 @@ fn a_link_that_leads_into_git_is_not_followed() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_link_into_git_in_capitals_is_not_followed() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    // Where the file system tells capitals apart, `.GIT` is a directory of its own.
+    // Where it does not, `.GIT` is `.git`. A link into either is refused.
+    let history = History::new();
+    history.commit("src/notes.txt", "notes\n", "2026-01-01");
+    fs::create_dir_all(history.dir.join(".GIT")).unwrap();
+    fs::write(history.dir.join(".GIT/note.txt"), "a note\n").unwrap();
+    std::os::unix::fs::symlink(".GIT", history.dir.join("upper")).unwrap();
+    one_row(
+        &history.dir,
+        "name = \"note\"\nrun = \"rg -n -F note upper/note.txt\"\nshows = \"a line kept beside what git keeps\"",
+    );
+    assert_eq!(
+        stdout(&ley(&history.dir, &["check"])),
+        "ley.toml:1: could not run: \"note\": `upper/note.txt` leads into `.git`, which is not the same in every clone\n    rg -n -F note upper/note.txt\n1 row: 1 could not run.\n"
+    );
+}
+
+#[test]
+fn no_search_reaches_git_a_hidden_directory_or_what_git_ignores() {
+    if !have(&["rg", "ast-grep", "git"]) {
+        return;
+    }
+    let history = History::new();
+    for dir in [".hid", "build"] {
+        fs::create_dir_all(history.dir.join(dir)).unwrap();
+    }
+    for file in ["src/a.js", ".dot.js", ".hid/b.js", "build/out.js"] {
+        fs::write(history.dir.join(file), "needle(1);\n").unwrap();
+    }
+    history.commit(".gitignore", "build/\n", "2026-01-01");
+    fs::write(history.dir.join(".git/extra.js"), "needle(1);\n").unwrap();
+    // Four files hold the call, and one is planted in `.git`. No row reaches `.git`,
+    // the hidden directory or the ignored one. A type or a language also reads the
+    // hidden file that is in no hidden directory. A plain search does not.
+    let rows: Vec<String> = [
+        ("rg -l -F needle -g '!ley.toml' .", 1),
+        ("rg -l -F needle -t js .", 2),
+        ("ast-grep run -p 'needle($A)' .", 1),
+        ("ast-grep run -p 'needle($A)' -l js --globs '!*.md' .", 2),
+        ("ast-grep scan --inline-rules '{id: t, language: js, rule: {pattern: needle($A)}, files: [.git/**, build/**, src/**]}' .", 1),
+    ]
+    .iter()
+    .map(|(run, count)| {
+        format!(
+            "[[row]]\nname = \"calls\"\nrun = \"{run}\"\nshows = \"each call to the function in a file the search reads\"\ncount = {count}\n"
+        )
+    })
+    .collect();
+    fs::write(history.dir.join("ley.toml"), rows.join("\n")).unwrap();
+    assert_eq!(stdout(&ley(&history.dir, &["check"])), "5 rows: 5 hold.\n");
+}
+
+#[test]
+fn since_says_plainly_when_the_branch_has_no_commits() {
+    if !have(&["git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("ley.toml", &alpha_ledger(""), "2026-01-01");
+    history.git(&["checkout", "--quiet", "--orphan", "other"], "");
+    let output = ley(&history.dir, &["since"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "ley: the branch `other` has no commits yet\n"
+    );
+}
+
 #[test]
 fn since_says_plainly_when_there_are_no_commits() {
     if !have(&["git"]) {
