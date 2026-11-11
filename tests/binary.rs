@@ -1208,30 +1208,47 @@ fn since_says_when_it_did_not_check_a_date() {
 // The next tests come from a fifth review, of the fixes for the fourth.
 
 #[test]
-fn a_glob_cannot_reach_into_git() {
-    if !have(&["rg", "ast-grep", "git"]) {
-        return;
-    }
-    let history = History::new();
-    history.commit(
-        "src/notes.js",
-        "// ref: in the notes\nconst one = 1;\n",
-        "2026-01-01",
-    );
-    // What git keeps is not the same in every clone. `.git/HEAD` holds "ref:", and
-    // this file would be a second match for the pattern below.
-    fs::write(history.dir.join(".git/extra.js"), "const two = 2;\n").unwrap();
-    // A glob as plain as `*` makes both programs search hidden places. The ledger
-    // itself holds the words of its own commands, so it is one of the files found.
+fn a_glob_that_includes_files_is_shown_and_not_run() {
+    // A glob as plain as `*` makes rg and ast-grep search what git ignores and what
+    // is hidden, `.git` among it. Those are not the same on every machine, so the
+    // row is not run. Nothing is started, so this test needs neither program.
+    let (_holder, dir) = example();
     rows(
-        &history.dir,
+        &dir,
         &[
-            "name = \"ref\"\nrun = \"rg -l -F ref: -g '*' .\"\nshows = \"the files that hold a ref\"\ncount = 2",
-            "name = \"const\"\nrun = \"ast-grep run -l js -p 'const $A = $B' --globs '*' .\"\nshows = \"each constant\"",
+            "name = \"all\"\nrun = \"rg -l -F Stage -g '*' .\"\nshows = \"the files that mention a stage\"\ncount = 2",
+            "name = \"some\"\nrun = \"ast-grep run -l ts -p 'interface $A { $$$ }' --globs '*.ts' .\"\nshows = \"each interface\"",
         ],
     );
-    let output = ley(&history.dir, &["check"]);
-    assert_eq!(stdout(&output), "2 rows: 2 hold.\n");
+    let output = ley(&dir, &["check"]);
+    let printed = stdout(&output);
+    assert!(output.status.success(), "{printed}");
+    assert!(
+        printed.contains("not checked: \"all\": `-g *` includes files"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("not checked: \"some\": `--globs *.ts` includes files"),
+        "{printed}"
+    );
+    assert!(printed.ends_with("2 rows: 2 not checked.\n"), "{printed}");
+    // The reader still sees the command exactly as it was written.
+    let shown = stdout(&ley(&dir, &["show", "all"]));
+    assert!(shown.contains("    rg -l -F Stage -g '*' .\n"), "{shown}");
+}
+
+#[test]
+fn a_glob_that_leaves_files_out_runs_as_written() {
+    if !have(&["rg"]) {
+        return;
+    }
+    // The ledger holds the words of its own command. The glob leaves it out.
+    let (_holder, dir) = example();
+    one_row(
+        &dir,
+        "name = \"stage\"\nrun = \"rg -l -F Stage -g '!*.toml' .\"\nshows = \"the files that mention a stage, other than this ledger\"",
+    );
+    assert_eq!(stdout(&ley(&dir, &["check"])), "1 row: 1 holds.\n");
 }
 
 #[cfg(unix)]

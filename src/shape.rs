@@ -37,9 +37,9 @@ pub struct Shape {
     /// Flags `ley` adds each time it runs the program. A row never carries them.
     #[serde(default)]
     pub adds: Vec<String>,
-    /// Flags `ley` adds after the row's own, where they win over any glob the row gives.
+    /// Options that take a glob. Here a glob may only leave files out: `!*.md`.
     #[serde(default)]
-    pub adds_last: Vec<String>,
+    pub only_excluding: Vec<String>,
     #[serde(default)]
     pub needs_one_of: Vec<String>,
     #[serde(default)]
@@ -121,18 +121,17 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
     let mut seen: Vec<&str> = Vec::new();
     let mut named_paths: Vec<String> = Vec::new();
     let mut positional: Vec<&str> = Vec::new();
-    // Where the row's `--` is, if it has one. After it, nothing is read as a flag.
-    let mut separator: Option<usize> = None;
+    let mut only_positional = false;
     let mut i = 0;
     while i < rest.len() {
         let word = rest[i].as_str();
         i += 1;
-        if separator.is_some() || !word.starts_with('-') || word == "-" {
+        if only_positional || !word.starts_with('-') || word == "-" {
             positional.push(word);
             continue;
         }
         if word == "--" {
-            separator = Some(i - 1);
+            only_positional = true;
             continue;
         }
         let (name, inline) = match word.split_once('=') {
@@ -157,6 +156,14 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
             if shape.path_options.iter().any(|o| o == name) {
                 inside(value)?;
                 named_paths.push(value.to_string());
+            }
+            if shape.only_excluding.iter().any(|o| o == name) && !value.starts_with('!') {
+                return Err(format!(
+                    "`{name} {value}` includes files. A glob that includes files also makes \
+                     `{program}` search what git ignores and what is hidden, `.git` among it, \
+                     and those are not the same on every machine. Name a path. \
+                     `{name}` may only leave files out, as in `{name} '!*.md'`"
+                ));
             }
         } else {
             return Err(format!("`{name}` is not in the shape for `{title}`"));
@@ -189,12 +196,8 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
         ));
     }
 
-    // The flags that go last sit after the row's own flags, and before a `--`:
-    // after that, the program would read them as paths.
+    // Added flags go right after the program and its subcommand, before any `--`.
     let mut plain = words.to_vec();
-    let last = separator.map_or(plain.len(), |index| at + index);
-    plain.splice(last..last, shape.adds_last.iter().cloned());
-    // The other added flags go right after the program and its subcommand.
     plain.splice(at..at, shape.adds.iter().cloned());
     let (argv, plain) = match shape.counts {
         Counts::Lines => (plain, None),
@@ -229,11 +232,8 @@ fn inside(path: &str) -> Result<(), String> {
     if path.split(['/', '\\']).any(|part| part == "..") {
         return Err(format!("`{path}` leaves the ledger's directory"));
     }
-    // Some file systems read `.GIT` as `.git`.
-    if path
-        .split(['/', '\\'])
-        .any(|part| part.eq_ignore_ascii_case(".git"))
-    {
+    // A file system that reads `.GIT` as `.git` is caught when the path is looked at.
+    if path.split(['/', '\\']).any(|part| part == ".git") {
         return Err(format!(
             "`{path}` is inside `.git`, which is not the same in every clone"
         ));
@@ -253,11 +253,6 @@ pub fn describe() -> String {
         if matches!(shape.counts, Counts::JsonLines | Counts::JsonItems) {
             adds.push("--json=stream".into());
         }
-        // Written the way a reader would have to type it.
-        adds.extend(shape.adds_last.iter().map(|word| match word.contains('!') {
-            true => format!("'{word}'"),
-            false => word.clone(),
-        }));
         if !adds.is_empty() {
             out.push_str(&listed("`ley` adds:", &adds));
         }
@@ -269,6 +264,12 @@ pub fn describe() -> String {
         }
         if !shape.options.is_empty() {
             out.push_str(&listed("options, each with a value:", &shape.options));
+        }
+        if !shape.only_excluding.is_empty() {
+            out.push_str(&listed(
+                "a glob may only leave files out, as '!*.md':",
+                &shape.only_excluding,
+            ));
         }
         out.push('\n');
     }
@@ -329,11 +330,7 @@ mod tests {
                 "--no-ignore-exclude"
             ]
         );
-        // Then the row's own words, and last the glob that keeps rg out of `.git`.
-        assert_eq!(
-            plan.argv[4..],
-            ["-n", "interface Stage", "src", "-g", "!.git"]
-        );
+        assert_eq!(plan.argv[4..], ["-n", "interface Stage", "src"]);
         assert_eq!(plan.plain, None);
         assert_eq!(plan.counts, Counts::Lines);
         assert_eq!(plan.paths, ["src"]);
@@ -350,31 +347,37 @@ mod tests {
         let plain = plan.plain.as_ref().unwrap();
         assert!(!plain.iter().any(|word| word.starts_with("--json")));
         assert_eq!(
-            plain[plain.len() - 7..],
-            [
-                "--type",
-                "interface",
-                "--match",
-                "^Stage$",
-                "src",
-                "--globs",
-                "!.git"
-            ]
+            plain[plain.len() - 5..],
+            ["--type", "interface", "--match", "^Stage$", "src"]
         );
         assert_eq!(plan.counts, Counts::JsonItems);
         // Added flags go before a `--`, so they are read as flags.
         let plan = fit("ast-grep run -p 'foo($A)' -- src").unwrap();
         assert_eq!(plan.argv[..3], ["ast-grep", "run", "--json=stream"]);
         assert_eq!(
-            plan.argv[plan.argv.len() - 6..],
-            ["-p", "foo($A)", "--globs", "!.git", "--", "src"]
+            plan.argv[plan.argv.len() - 4..],
+            ["-p", "foo($A)", "--", "src"]
         );
-        // A `--` that is the value of an option is not the end of the flags.
-        let plan = fit("rg -e -- -g '*' src").unwrap();
+    }
+
+    #[test]
+    fn a_glob_may_only_leave_files_out() {
+        // A glob that leaves files out cannot reach what git ignores or what is hidden.
+        let plan = fit("rg -n Stage -g '!*.md' '--glob=!docs' src").unwrap();
         assert_eq!(
-            plan.argv[plan.argv.len() - 7..],
-            ["-e", "--", "-g", "*", "src", "-g", "!.git"]
+            plan.argv[4..],
+            ["-n", "Stage", "-g", "!*.md", "--glob=!docs", "src"]
         );
+        assert!(fit("ast-grep run -p x --globs '!*.test.js' src").is_ok());
+        // `ley` adds no glob of its own: it runs the search the row shows.
+        for shape in shapes() {
+            let adds_a_glob = shape.adds.iter().any(|word| {
+                matches!(word.as_str(), "-g" | "--glob" | "--globs")
+                    || word.starts_with("--glob=")
+                    || word.starts_with("--globs=")
+            });
+            assert!(!adds_a_glob, "{}", shape.title());
+        }
     }
 
     #[test]
@@ -398,7 +401,15 @@ mod tests {
             ("rg Stage ../other", "leaves the ledger's directory"),
             ("rg Stage src/../../x", "leaves the ledger's directory"),
             ("rg -n main .git/HEAD", "is inside `.git`"),
-            ("rg -n main sub/.GIT/config", "is inside `.git`"),
+            ("rg -l ref -g '*' src", "`-g *` includes files"),
+            (
+                "rg --files --glob=ley.toml src",
+                "`--glob ley.toml` includes files",
+            ),
+            (
+                "ast-grep run -p x --globs '*.js' src",
+                "`--globs *.js` includes files",
+            ),
             ("rg -g", "`-g` needs a value"),
             ("rg --files=yes src", "takes no value"),
             ("ast-grep run src", "needs one of"),

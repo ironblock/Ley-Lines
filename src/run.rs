@@ -40,8 +40,8 @@ pub enum Outcome {
 /// What kind of thing kept a command from showing anything that can be counted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fault {
-    /// A path the command names is not in the place, or leads out of it. `ley`
-    /// did not start the program.
+    /// A path the command names is not in the place, or a link leads it out of
+    /// the place or into `.git`. `ley` did not start the program.
     Path,
     /// The program ran to its end and said it failed.
     SaidSo,
@@ -181,7 +181,7 @@ fn is_a_tally_of_findings(line: &str) -> bool {
         .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
-/// A path the row names that is not in `dir`, or that leads out of it.
+/// A path the row names that is not in `dir`, or that leads out of it or into `.git`.
 ///
 /// A row's paths are checked by their spelling when the row is read. Here they are
 /// checked against the place itself: a link in the repository can lead anywhere,

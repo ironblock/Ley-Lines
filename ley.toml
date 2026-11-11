@@ -176,7 +176,7 @@ said = [{ by = "Claude Fable 5.2", on = 2026-11-10 }]
 
 [[row]]
 name = "example"
-run = "rg --files -g ley.toml examples"
+run = "rg -l -F '[[row]]' examples"
 shows = "the ledger of each example"
 since = 2026-11-10
 sha = "e51337a717b4"

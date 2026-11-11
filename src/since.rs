@@ -360,11 +360,18 @@ pub fn since(ledger: &Ledger, limit: Duration) -> Result<Walk, String> {
 /// day it was committed. Git is asked once, with a command whose output a user's
 /// settings do not change.
 fn history(root: &Path) -> Result<Vec<(String, Date)>, String> {
-    if git(root, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_err() {
-        return Err("the repository has no commits yet".into());
-    }
-    let listed = git(root, &["rev-list", "--first-parent", "--timestamp", "HEAD"])
-        .map_err(|said| format!("git could not list the commits of this repository\n{said}"))?;
+    let listed = match git(root, &["rev-list", "--first-parent", "--timestamp", "HEAD"]) {
+        Ok(listed) => listed,
+        Err(said) => {
+            // With no commit on any branch, there is nothing wrong: nothing is there yet.
+            let none_at_all =
+                git(root, &["rev-list", "--max-count=1", "--all"]).is_ok_and(|any| any.is_empty());
+            return Err(match none_at_all {
+                true => "the repository has no commits yet".into(),
+                false => format!("git could not list the commits of this repository\n{said}"),
+            });
+        }
+    };
     let mut commits = Vec::new();
     for line in listed.lines() {
         let read = line.split_once(' ').and_then(|(seconds, commit)| {

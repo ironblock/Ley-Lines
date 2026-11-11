@@ -740,7 +740,9 @@ fn stored_output(text: &str) -> Option<String> {
             continue;
         }
         for (at, _) in word.match_indices(':') {
+            // The file's name, without a quote mark or bracket after it.
             let (file, rest) = (&word[..at], &word[at + 1..]);
+            let file = file.trim_end_matches(|c: char| !c.is_alphanumeric());
             let ending = file
                 .rsplit_once('.')
                 .map(|(_, end)| end.to_ascii_lowercase());
@@ -949,6 +951,8 @@ mod tests {
             ("the clause at lib/app.ex:40", Some("lib/app.ex:40")),
             ("the type in Main.hs:7", Some("Main.hs:7")),
             ("the target at `Makefile:12`", Some("`Makefile:12`")),
+            ("the target at `Makefile`:12", Some("`Makefile`:12")),
+            ("see \"stage.ts\":14 for it", Some("\"stage.ts\":14")),
             (
                 "the stage (Dockerfile.prod:3) that builds it",
                 Some("(Dockerfile.prod:3)"),

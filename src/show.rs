@@ -31,7 +31,9 @@ pub fn sentences(row: &Row) -> String {
     let mut out = String::new();
     if let Some(definition) = row.definition() {
         out.push_str(&format!("{} is {}.\n", row.name, definition.is));
-        // One source, one line. A name cannot then read as two sources.
+        // One source, one line. A name is still free text, and can be worded to read
+        // as two people. What stops that is a reader of the ledger itself, where
+        // the name sits between its own quotes.
         for source in &definition.said {
             out.push_str(&format!("  Said by {} on {}.\n", source.by, source.on));
         }
