@@ -83,6 +83,8 @@ pub struct Plan {
     /// something else. `None` when `argv` already prints that text.
     pub plain: Option<Vec<String>>,
     pub counts: Counts,
+    /// The paths the row names: where to search, and any file an option reads.
+    pub paths: Vec<String>,
 }
 
 /// Fit `words` to a shape, or say why they fit none.
@@ -114,6 +116,7 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
     let rest = &words[at..];
 
     let mut seen: Vec<&str> = Vec::new();
+    let mut named_paths: Vec<String> = Vec::new();
     let mut positional: Vec<&str> = Vec::new();
     let mut only_positional = false;
     let mut i = 0;
@@ -149,6 +152,7 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
             };
             if shape.path_options.iter().any(|o| o == name) {
                 inside(value)?;
+                named_paths.push(value.to_string());
             }
         } else {
             return Err(format!("`{name}` is not in the shape for `{title}`"));
@@ -192,10 +196,12 @@ pub fn plan(words: &[String]) -> Result<Plan, String> {
             (argv, Some(plain))
         }
     };
+    named_paths.extend(paths.iter().map(|path| path.to_string()));
     Ok(Plan {
         argv,
         plain,
         counts: shape.counts,
+        paths: named_paths,
     })
 }
 
@@ -214,6 +220,11 @@ fn inside(path: &str) -> Result<(), String> {
     }
     if path.split(['/', '\\']).any(|part| part == "..") {
         return Err(format!("`{path}` leaves the ledger's directory"));
+    }
+    if path.split(['/', '\\']).any(|part| part == ".git") {
+        return Err(format!(
+            "`{path}` is inside `.git`, which is not the same in every clone"
+        ));
     }
     Ok(())
 }
@@ -304,6 +315,10 @@ mod tests {
         assert_eq!(plan.argv[4..], ["-n", "interface Stage", "src"]);
         assert_eq!(plan.plain, None);
         assert_eq!(plan.counts, Counts::Lines);
+        assert_eq!(plan.paths, ["src"]);
+        // A file that an option reads is one of the row's paths too.
+        let plan = fit("ast-grep scan -r rules/stage.yml services docs").unwrap();
+        assert_eq!(plan.paths, ["rules/stage.yml", "services", "docs"]);
     }
 
     #[test]
@@ -347,6 +362,7 @@ mod tests {
             ("rg Stage -", "`-` means standard input"),
             ("rg Stage ../other", "leaves the ledger's directory"),
             ("rg Stage src/../../x", "leaves the ledger's directory"),
+            ("rg -n main .git/HEAD", "is inside `.git`"),
             ("rg -g", "`-g` needs a value"),
             ("rg --files=yes src", "takes no value"),
             ("ast-grep run src", "needs one of"),

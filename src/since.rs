@@ -12,18 +12,20 @@
 //! that is cut short, or squashed, or that does not have the recorded commit shows
 //! no such thing, so the date stays.
 //!
-//! The walk reads the repository and writes nothing into it. See `Tree`.
+//! The walk registers nothing in the repository and runs none of its hooks. See `Tree`.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use toml::value::Date;
 
 use crate::check::{self, Status};
 use crate::ledger::{Ledger, Since};
+use crate::run::Fault;
 use crate::text::shown;
 
 /// What the walk found for one row.
@@ -185,9 +187,9 @@ pub fn since(ledger: &Ledger, limit: Duration) -> Result<Walk, String> {
         .dir()
         .canonicalize()
         .map_err(|e| format!("{}: {e}", ledger.dir().display()))?;
-    let root = git(&dir, &["rev-parse", "--show-toplevel"]).map_err(|_| {
+    let root = git(&dir, &["rev-parse", "--show-toplevel"]).map_err(|said| {
         format!(
-            "`ley since` reads git history, and {} is not in a git repository",
+            "`ley since` reads git history, and git could not read any in {}\n{said}",
             dir.display()
         )
     })?;
@@ -234,10 +236,9 @@ pub fn since(ledger: &Ledger, limit: Duration) -> Result<Walk, String> {
                 let status = if place.is_dir() {
                     check::status(pointer, &place, limit)
                 } else {
-                    // The place itself is not there. A program would say so too.
                     Status::CouldNotRun {
                         why: "the ledger's directory is not in this commit".into(),
-                        ran: true,
+                        fault: Fault::Path,
                     }
                 };
                 match status {
@@ -299,7 +300,13 @@ pub fn since(ledger: &Ledger, limit: Duration) -> Result<Walk, String> {
             let found = match (oldest, status) {
                 // The program did not run at that commit. That says nothing about
                 // the place, so it is not a commit where the row did not hold.
-                (Some(step), Status::CouldNotRun { why, ran: false }) => Found::Since {
+                (
+                    Some(step),
+                    Status::CouldNotRun {
+                        why,
+                        fault: Fault::DidNotRun,
+                    },
+                ) => Found::Since {
                     since: held_since(step),
                     commits: step + 1,
                     stopped: Stopped::CouldNotRun {
@@ -308,8 +315,8 @@ pub fn since(ledger: &Ledger, limit: Duration) -> Result<Walk, String> {
                     },
                     recorded: placed(index, step, None),
                 },
-                // The command showed something else, or the program said it failed,
-                // as it does before the path it searches exists.
+                // The command showed something else, or a path it names was not there
+                // yet, or the program said it failed.
                 (Some(step), _) => Found::Since {
                     since: held_since(step),
                     commits: step + 1,
@@ -319,6 +326,16 @@ pub fn since(ledger: &Ledger, limit: Duration) -> Result<Walk, String> {
                 (None, Status::Differs { got, .. }) => {
                     Found::NotNow(format!("the command showed {got}"))
                 }
+                // A path the row names is not in the current commit: the row cannot
+                // hold there. Any other failure may be this machine's, an old
+                // program for one, so it shows nothing about the row.
+                (
+                    None,
+                    Status::CouldNotRun {
+                        why,
+                        fault: Fault::Path,
+                    },
+                ) => Found::NotNow(why),
                 (None, Status::CouldNotRun { why, .. } | Status::NotChecked(why)) => {
                     Found::CouldNotRun(why)
                 }
@@ -340,14 +357,15 @@ pub fn since(ledger: &Ledger, limit: Duration) -> Result<Walk, String> {
 }
 
 /// The commits from the current one back along the first parent, each with the
-/// day it was committed. Git is asked once.
+/// day it was committed. Git is asked once, with a command whose output a user's
+/// settings do not change.
 fn history(root: &Path) -> Result<Vec<(String, Date)>, String> {
-    let listed = git(root, &["log", "--first-parent", "--format=%H %ct", "HEAD"])
-        .map_err(|_| "the repository has no commits yet".to_string())?;
+    let listed = git(root, &["rev-list", "--first-parent", "--timestamp", "HEAD"])
+        .map_err(|said| format!("git could not list the commits of this repository\n{said}"))?;
     let mut commits = Vec::new();
     for line in listed.lines() {
-        let read = line.split_once(' ').and_then(|(commit, seconds)| {
-            Some((commit.to_string(), day(seconds.trim().parse().ok()?)?))
+        let read = line.split_once(' ').and_then(|(seconds, commit)| {
+            Some((commit.trim().to_string(), day(seconds.parse().ok()?)?))
         });
         commits.push(read.ok_or_else(|| format!("git listed a commit `ley` cannot read: {line}"))?);
     }
@@ -388,9 +406,15 @@ fn day(seconds: i64) -> Option<Date> {
 /// The files of one commit at a time, in a temporary directory.
 ///
 /// Git puts them there through an index that belongs to the walk. So the walk
-/// writes nothing into the repository. It registers no working tree. It does not
-/// touch the user's files, index or HEAD. It runs none of the user's hooks. A walk
-/// that is stopped half way leaves only its temporary directory behind.
+/// registers no working tree. It does not touch the user's files, index or HEAD.
+/// It runs none of the user's hooks. A walk that is stopped half way leaves only
+/// its temporary directory behind.
+///
+/// Git checks the files out the way it would for the user. So the filters that
+/// the user's settings name for that do run, and git fetches what a commit needs
+/// and the clone lacks: large files kept by git-lfs, files a partial clone left
+/// out. Switching the filters off would give the walk other files than the user
+/// has, and a row could then hold for the user and not for the walk.
 struct Tree {
     root: PathBuf,
     /// Where the files are.
@@ -449,6 +473,9 @@ impl Tree {
 /// The variables git sets to say which repository a command is about. Inside a git
 /// hook they name the user's own repository and index. `ley` clears them, so that
 /// every git command it runs is about the directory it names and nothing else.
+///
+/// This is the list as git 2.43 gives it. `git_place` also asks the git that is
+/// installed, which may know of more.
 pub const GIT_PLACE: [&str; 15] = [
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     "GIT_CONFIG",
@@ -467,11 +494,35 @@ pub const GIT_PLACE: [&str; 15] = [
     "GIT_COMMON_DIR",
 ];
 
+/// Every variable to clear: the list above, and the list the installed git gives.
+fn git_place() -> &'static [String] {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names: Vec<String> = GIT_PLACE.iter().map(|name| name.to_string()).collect();
+        let mut command = Command::new("git");
+        command
+            .args(["rev-parse", "--local-env-vars"])
+            .stdin(Stdio::null());
+        for name in GIT_PLACE {
+            command.env_remove(name);
+        }
+        if let Ok(output) = command.output() {
+            for name in String::from_utf8_lossy(&output.stdout).lines() {
+                let name = name.trim();
+                if name.starts_with("GIT_") && !names.iter().any(|known| known == name) {
+                    names.push(name.to_string());
+                }
+            }
+        }
+        names
+    })
+}
+
 /// A git command about the repository in `dir`, with nothing on standard input.
 fn git_command(dir: &Path) -> Command {
     let mut command = Command::new("git");
     command.arg("-C").arg(dir).stdin(Stdio::null());
-    for name in GIT_PLACE {
+    for name in git_place() {
         command.env_remove(name);
     }
     command

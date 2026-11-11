@@ -658,7 +658,13 @@ fn since_needs_a_git_repository() {
     let (_holder, dir) = example();
     let output = ley(&dir, &["since"]);
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("is not in a git repository"));
+    // The reason is given in git's own words, whatever it is.
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        said.starts_with("ley: `ley since` reads git history, and git could not read any in "),
+        "{said}"
+    );
+    assert!(said.contains("not a git repository"), "{said}");
 }
 
 // The next tests come from a third review.
@@ -999,38 +1005,52 @@ fn a_since_that_is_stopped_half_way_leaves_nothing_in_the_repository() {
     if !have(&["rg", "git"]) {
         return;
     }
-    let history = history_with_work_in_progress(40);
+    let history = history_with_work_in_progress(3);
     let (files, status) = history.snapshot();
     // The walk's own temporary directory goes here, so the test can look for it.
     let temporary = history.dir.with_file_name("temporary");
     fs::create_dir(&temporary).unwrap();
+    // An rg that never answers: it says which process it is, and waits. So the walk
+    // is sure to be half way when it is stopped, however fast or slow the machine.
+    let waiting = history.dir.with_file_name("rg-is-waiting");
+    let bin = history.dir.with_file_name("bin");
+    let script = format!(
+        "#!/bin/sh\necho $$ > '{}'\nexec '{}' 600\n",
+        waiting.display(),
+        common::path_of("sleep")
+    );
+    common::path_with_git_and(&bin, &[("rg", &script)]);
 
     let mut child = ley_command(&history.dir)
         .arg("since")
+        .env("PATH", &bin)
         .env("TMPDIR", &temporary)
         .stdout(std::process::Stdio::null())
         .spawn()
         .unwrap();
-    // Wait until the walk has put a commit's files into its directory, then stop it
-    // the way a closed terminal or a full machine would: with no chance to tidy up.
-    let started = std::time::Instant::now();
-    let walking = |dir: &Path| {
-        fs::read_dir(dir).is_ok_and(|entries| {
-            entries
-                .flatten()
-                .any(|entry| entry.path().join("tree/src/words.txt").is_file())
-        })
+    let rg = loop {
+        let said = fs::read_to_string(&waiting).unwrap_or_default();
+        if let Ok(process) = said.trim().parse::<u32>() {
+            break process;
+        }
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "`ley since` ended before it started rg"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
     };
-    while !walking(&temporary) && started.elapsed().as_secs() < 30 {
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
-    let still_running = child.try_wait().unwrap().is_none();
+    // Stop `ley` the way a closed terminal or a full machine would: with no chance
+    // to tidy up. Then stop the rg it left waiting.
     child.kill().unwrap();
     child.wait().unwrap();
-    assert!(still_running, "the walk ended before it could be stopped");
+    let _ = Command::new("kill").args(["-9", &rg.to_string()]).status();
 
     // What is left behind is in the temporary directory, and only there.
-    assert!(walking(&temporary));
+    let left_behind = fs::read_dir(&temporary)
+        .unwrap()
+        .flatten()
+        .any(|entry| entry.path().join("tree/src/words.txt").is_file());
+    assert!(left_behind, "the walk had put no files into its directory");
     assert_eq!(history.git(&["worktree", "list"], "").lines().count(), 1);
     assert!(!history.dir.join(".git/worktrees").exists());
     let (files_after, status_after) = history.snapshot();
@@ -1042,4 +1062,131 @@ fn a_since_that_is_stopped_half_way_leaves_nothing_in_the_repository() {
         assert!(files_after[name] == *bytes, ".git/{name} changed");
     }
     assert_eq!(status, status_after);
+}
+
+// The next tests come from a fourth review.
+
+#[test]
+fn show_reads_several_words_as_one_name() {
+    // Most names are several words, and `ley show` lists them without quotes.
+    let (_holder, dir) = example();
+    let quoted = stdout(&ley(&dir, &["show", "package manager"]));
+    assert_eq!(quoted.matches("If you run").count(), 1, "{quoted}");
+    assert_eq!(stdout(&ley(&dir, &["show", "package", "manager"])), quoted);
+
+    // "no" is part of "known" and "not". The rule's own rows are all that is printed.
+    let rule = stdout(&ley(repository(), &["show", "no", "stored", "output"]));
+    assert_eq!(
+        rule,
+        stdout(&ley(repository(), &["show", "no stored output"]))
+    );
+    assert!(
+        rule.starts_with("no stored output is the rule that"),
+        "{rule}"
+    );
+    assert!(!rule.contains("earliest known"), "{rule}");
+
+    // When no name holds all the words, each word is a name of its own, and a row
+    // that two of them select is printed once.
+    let both = ley(&dir, &["show", "stage", "platform", "Stage"]);
+    assert!(both.status.success());
+    let both = stdout(&both);
+    assert_eq!(
+        both,
+        format!(
+            "{}\n{}",
+            stdout(&ley(&dir, &["show", "stage"])),
+            stdout(&ley(&dir, &["show", "platform"]))
+        )
+    );
+}
+
+#[test]
+fn show_prints_each_source_on_a_line_of_its_own() {
+    let shown = stdout(&ley(repository(), &["show", "ledger"]));
+    assert!(
+        shown.contains(
+            "\n  Said by Claude Fable 5.2 on 2026-11-10.\n  Said by Corey Vixie on 2026-11-11.\n"
+        ),
+        "{shown}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_that_leads_out_of_the_ledgers_directory_is_not_followed() {
+    if !have(&["rg"]) {
+        return;
+    }
+    let (holder, dir) = example();
+    // A file outside the ledger's directory, and a link to its directory inside.
+    let elsewhere = holder.path().join("elsewhere");
+    fs::create_dir(&elsewhere).unwrap();
+    fs::write(elsewhere.join("notes.txt"), "Stage\n").unwrap();
+    std::os::unix::fs::symlink(&elsewhere, dir.join("outside")).unwrap();
+    // A link that stays inside is an ordinary path.
+    std::os::unix::fs::symlink(dir.join("docs"), dir.join("papers")).unwrap();
+    rows(
+        &dir,
+        &[
+            "name = \"out\"\nrun = \"rg -l -F Stage outside/notes.txt\"\nshows = \"the notes that mention a stage\"",
+            "name = \"in\"\nrun = \"rg -l -F Quillon papers/glossary.md\"\nshows = \"the glossary\"",
+        ],
+    );
+    let output = ley(&dir, &["check"]);
+    assert_eq!(
+        stdout(&output),
+        "ley.toml:1: could not run: \"out\": `outside/notes.txt` leads out of the ledger's directory\n    rg -l -F Stage outside/notes.txt\n2 rows: 1 holds, 1 could not run.\n"
+    );
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
+fn since_removes_the_date_of_a_row_whose_path_is_gone() {
+    if !have(&["rg", "git"]) {
+        return;
+    }
+    // The row searches `src`, and a commit takes `src` away. That is not a program
+    // that could not run: the row cannot hold, and its date goes, as it does for
+    // a row whose match is gone.
+    let history = History::new();
+    let first = history.commit("src/words.txt", "alpha\n", "2026-01-01");
+    fs::remove_dir_all(history.dir.join("src")).unwrap();
+    history.commit(
+        "ley.toml",
+        &alpha_ledger(&recorded("2026-01-01", &first)),
+        "2026-02-01",
+    );
+
+    let output = ley(&history.dir, &["since"]);
+    assert_eq!(
+        stdout(&output),
+        "ley.toml:1: \"alpha\": does not hold at the current commit (`src` is not there): the recorded date is removed\nRecorded 1 row in ley.toml.\n"
+    );
+    assert!(output.status.success());
+    assert_eq!(
+        fs::read_to_string(history.dir.join("ley.toml")).unwrap(),
+        alpha_ledger("")
+    );
+}
+
+#[test]
+fn since_says_when_it_did_not_check_a_date() {
+    if !have(&["git"]) {
+        return;
+    }
+    let history = History::new();
+    history.commit("src/words.txt", "alpha\n", "2026-01-01");
+    let ledger = "[[row]]\nname = \"alpha\"\nrun = \"rg -c -F alpha src | sort\"\nshows = \"how many lines hold alpha\"\nsince = 2020-01-01\nsha = \"0123456789ab\"\n";
+    history.commit("ley.toml", ledger, "2026-02-01");
+    let output = ley(&history.dir, &["since"]);
+    assert_eq!(
+        stdout(&output),
+        "ley.toml:1: \"alpha\": not checked: `|` needs a shell, and `ley` starts none. The date this row carries was not checked either\nNothing to record.\n"
+    );
+    // The date stays: another version of `ley` may have been able to check it.
+    assert_eq!(
+        fs::read_to_string(history.dir.join("ley.toml")).unwrap(),
+        ledger
+    );
 }

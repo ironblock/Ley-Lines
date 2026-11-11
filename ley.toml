@@ -223,7 +223,7 @@ said = [{ by = "Claude Fable 5.2", on = 2026-11-10 }]
 name = "a command or a source"
 run = "rg -l -F '# breaks: source' fixtures/invalid"
 shows = "the broken ledgers that show what this rule refuses"
-count = 5
+count = 6
 since = 2026-11-10
 sha = "b3c7948adf94"
 

@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::command;
 use crate::ledger::{Ledger, Pointer, Row};
-use crate::run::{self, Outcome};
+use crate::run::{self, Fault, Outcome};
 use crate::shape::{self, Plan};
 use crate::text;
 
@@ -18,9 +18,8 @@ pub enum Status {
     Differs { got: u64, note: Option<String> },
     /// The row holds, and its `shows` repeats this text, which the command printed.
     Restates(String),
-    /// The command fits a shape, and could not run or said it failed. `ran` is true
-    /// when the program ran to its end and said so itself.
-    CouldNotRun { why: String, ran: bool },
+    /// The command fits a shape, and gave nothing that can be counted.
+    CouldNotRun { why: String, fault: Fault },
     /// The command fits no shape, so it was not run.
     NotChecked(String),
 }
@@ -47,7 +46,7 @@ fn counted(pointer: &Pointer, dir: &Path, limit: Duration) -> (Status, Option<(P
             results, printed, ..
         } if results == pointer.count => (Status::Holds, Some((plan, printed))),
         Outcome::Count { results, note, .. } => (Status::Differs { got: results, note }, None),
-        Outcome::Failed { why, ran } => (Status::CouldNotRun { why, ran }, None),
+        Outcome::Failed { why, fault } => (Status::CouldNotRun { why, fault }, None),
     }
 }
 
@@ -58,9 +57,13 @@ fn counted(pointer: &Pointer, dir: &Path, limit: Duration) -> (Status, Option<(P
 /// changes. "the package manager the directory declares: npm@10.8.0" does not,
 /// and the row would go on holding. Two kinds of repeat are found:
 ///
-/// - a word that looks like a value or a name: it has a digit, a capital letter,
-///   or one of `@ = / _` in it;
+/// - a word that looks like a value or a name: four characters or more, with a
+///   digit, a capital letter, or one of `@ = / _` among them;
+/// - a shorter word with a digit in it, down to two characters: `30`, `v2`;
 /// - two plain words in a row, each of four letters or more.
+///
+/// A single digit and a single plain word are let through. Each would be found in
+/// too much honest text.
 pub fn restated(pointer: &Pointer, name: &str, printed: &str) -> Option<String> {
     let allowed = format!("{} {name}", pointer.run).to_lowercase();
     let printed_lower = printed
@@ -75,10 +78,13 @@ pub fn restated(pointer: &Pointer, name: &str, printed: &str) -> Option<String> 
         .collect();
 
     for word in &words {
-        let looks_like_a_value = word.chars().count() >= 4
-            && word.chars().any(|c| {
-                c.is_ascii_digit() || c.is_uppercase() || matches!(c, '@' | '=' | '/' | '_')
-            });
+        let length = word.chars().count();
+        let has_a_digit = word.chars().any(|c| c.is_ascii_digit());
+        let looks_like_a_value = (length >= 2 && has_a_digit)
+            || (length >= 4
+                && word
+                    .chars()
+                    .any(|c| c.is_uppercase() || matches!(c, '@' | '=' | '/' | '_')));
         if looks_like_a_value && !allowed.contains(&word.to_lowercase()) && has_word(printed, word)
         {
             return Some((*word).to_string());
@@ -180,7 +186,10 @@ pub fn check(ledger: &Ledger, verbose: bool, limit: Duration) -> (Vec<String>, T
                     Some(text) => Status::Restates(text),
                     None => Status::Holds,
                 },
-                Err(why) => Status::CouldNotRun { why, ran: false },
+                Err(why) => Status::CouldNotRun {
+                    why,
+                    fault: Fault::DidNotRun,
+                },
             },
             (other, _) => other,
         };
@@ -259,6 +268,25 @@ mod tests {
             restated(&row, "extensions", MANIFEST).as_deref(),
             Some("npm@10.8.0")
         );
+    }
+
+    #[test]
+    fn a_short_value_copied_into_shows_is_found() {
+        for (shows, printed, found) in [
+            ("the retry limit, which is 30", "4:retries = 30\n", "30"),
+            (
+                "the port the service listens on: 443",
+                "9:listen = 443\n",
+                "443",
+            ),
+            ("the version in use, v2", "1:api = \"v2\"\n", "v2"),
+        ] {
+            let row = pointer("rg -n -F setting config", shows);
+            assert_eq!(restated(&row, "x", printed).as_deref(), Some(found));
+        }
+        // One digit says too little to be called a repeat.
+        let row = pointer("rg -n -F setting config", "the 3 settings that matter");
+        assert_eq!(restated(&row, "x", "3:setting = on\n"), None);
     }
 
     #[test]

@@ -60,8 +60,12 @@ enum Cmd {
     /// With no name, lists every name in the ledger. With a name, prints each
     /// row that has that name. If no row has exactly that name, prints each row
     /// whose name contains it. Letter case is ignored. Nothing is run.
+    ///
+    /// A name of several words needs no quotes: `ley show no stored output`.
+    /// When no name holds all the words together, each word is looked up as a
+    /// name of its own.
     Show {
-        /// The names to look up
+        /// The name to look up
         names: Vec<String>,
     },
     /// Run each row's command and compare what it shows with what the row says
@@ -102,9 +106,11 @@ enum Cmd {
     /// the date and commit of the oldest commit at which it held into the
     /// ledger, as `since` and `sha`. The date is the commit's day in UTC.
     ///
-    /// Each commit's files are put into a temporary directory. Nothing is
-    /// written into the repository, none of its hooks run, and your own files
-    /// are not touched, apart from the ledger.
+    /// Each commit's files are put into a temporary directory. No working tree
+    /// is registered, none of the repository's hooks run, and your own files
+    /// are not touched, apart from the ledger. Git checks the files out as it
+    /// would for you: its checkout filters run, and it fetches files that the
+    /// clone does not have.
     ///
     /// A recorded date moves earlier when more history is read. It moves later
     /// only when the history has the recorded commit and shows a commit after
@@ -209,20 +215,36 @@ fn show_rows(ledger: &Ledger, names: &[String]) -> ExitCode {
         print!("{}", show::index(ledger));
         return ExitCode::SUCCESS;
     }
+    // Most names are several words, and a reader types them without quotes. So the
+    // words are first read as one name. Only when no name holds them all is each
+    // word a name of its own.
+    let together = names.join(" ");
+    let names = match names.len() > 1 && !show::select(ledger, &together).is_empty() {
+        true => vec![together],
+        false => names.to_vec(),
+    };
     let mut code = ExitCode::SUCCESS;
-    let mut first = true;
-    for name in names {
+    let mut printed: Vec<*const ledger::Row> = Vec::new();
+    for name in &names {
         let rows = show::select(ledger, name);
         if rows.is_empty() {
             eprintln!("ley: no row has a name containing \"{}\"", shown(name));
             code = ExitCode::FAILURE;
             continue;
         }
-        if !first {
+        // A row that two of the names select is printed once.
+        let new: Vec<&ledger::Row> = rows
+            .into_iter()
+            .filter(|row| !printed.contains(&std::ptr::from_ref(*row)))
+            .collect();
+        if new.is_empty() {
+            continue;
+        }
+        if !printed.is_empty() {
             println!();
         }
-        first = false;
-        print!("{}", show::render(&rows));
+        printed.extend(new.iter().map(|row| std::ptr::from_ref(*row)));
+        print!("{}", show::render(&new));
     }
     code
 }
@@ -239,7 +261,14 @@ fn record_since(ledger: &Ledger, dry_run: bool) -> Result<ExitCode, String> {
             .and_then(|pointer| pointer.since.as_ref());
         let change = since::decide(recorded, &entry.found, walk.shallow);
         match &entry.found {
-            Found::NotChecked(why) => println!("{at}: not checked: {why}"),
+            Found::NotChecked(why) => match recorded {
+                // `ley` cannot run this command, so it cannot say whether the date
+                // is right. Another version of `ley` may have recorded it.
+                Some(_) => println!(
+                    "{at}: not checked: {why}. The date this row carries was not checked either"
+                ),
+                None => println!("{at}: not checked: {why}"),
+            },
             Found::CouldNotRun(why) => {
                 could_not_run += 1;
                 println!("{at}: could not run: {why}");

@@ -15,10 +15,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Every program is installed at a fixed version. So a build fails because
+      # this repository changed, and not because a newer program came out.
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal --component clippy --component rustfmt
+          rustup toolchain install 1.85.0 --profile minimal
+          rustup default 1.97.0
+
       - name: Install the programs that rows name
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes ripgrep
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/ripgrep.deb" \
+            https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep_14.1.0-1_amd64.deb
+          echo "78953d5a1c97cb363de0098ff73a7ef33fcae014abd4d62f0da490fe3f58ee94  $RUNNER_TEMP/ripgrep.deb" | sha256sum --check
+          sudo dpkg --install "$RUNNER_TEMP/ripgrep.deb"
           npm install --global @ast-grep/cli@0.51.1
           rg --version
           ast-grep --version
@@ -40,3 +50,7 @@ jobs:
 
       - name: Check the example's ledger
         run: cargo run --locked --quiet -- --ledger examples/pipeline/ley.toml check --strict
+
+      # Last, so that the steps above do not build twice.
+      - name: Build with the oldest Rust the README names
+        run: cargo +1.85.0 build --locked

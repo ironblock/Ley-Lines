@@ -31,12 +31,10 @@ pub fn sentences(row: &Row) -> String {
     let mut out = String::new();
     if let Some(definition) = row.definition() {
         out.push_str(&format!("{} is {}.\n", row.name, definition.is));
-        let said: Vec<String> = definition
-            .said
-            .iter()
-            .map(|source| format!("by {} on {}", source.by, source.on))
-            .collect();
-        out.push_str(&format!("  Said {}.\n", said.join(", ")));
+        // One source, one line. A name cannot then read as two sources.
+        for source in &definition.said {
+            out.push_str(&format!("  Said by {} on {}.\n", source.by, source.on));
+        }
     }
     if let Some(pointer) = row.pointer() {
         if !out.is_empty() {

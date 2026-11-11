@@ -128,6 +128,11 @@ refused = "leaves the ledger's directory"
 why = "A ledger is about the place it sits in."
 
 [[command]]
+run = "rg -n -F main .git/HEAD"
+refused = "is inside `.git`"
+why = "What git keeps in `.git` differs from one clone to the next."
+
+[[command]]
 run = "ast-grep scan services"
 refused = "needs one of"
 why = "With no rule named, scan uses whatever rule files the project has. The row would not say what it searches for."

@@ -34,31 +34,43 @@ pub enum Outcome {
         printed: String,
     },
     /// The command showed nothing that can be counted.
-    Failed {
-        why: String,
-        /// True when the program ran to its end and said it failed, as it does for a
-        /// path that is not there. False when it did not start, did not finish, or
-        /// printed something `ley` cannot count: then nothing was learned about the
-        /// place.
-        ran: bool,
-    },
+    Failed { why: String, fault: Fault },
 }
 
-/// Why a program gave nothing to count. `ran` is as in `Outcome::Failed`.
+/// What kind of thing kept a command from showing anything that can be counted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fault {
+    /// A path the command names is not in the place, or leads out of it. `ley`
+    /// did not start the program.
+    Path,
+    /// The program ran to its end and said it failed.
+    SaidSo,
+    /// The program did not start, did not finish, or printed something `ley`
+    /// cannot count. Nothing was learned about the place.
+    DidNotRun,
+}
+
+/// Why a program gave nothing to count.
 struct Failure {
     why: String,
-    ran: bool,
+    fault: Fault,
 }
 
 impl Failure {
     /// The program did not start, or did not run to its end.
     fn did_not_run(why: String) -> Failure {
-        Failure { why, ran: false }
+        Failure {
+            why,
+            fault: Fault::DidNotRun,
+        }
     }
 
     /// The program ran to its end and said it failed.
     fn said_so(why: String) -> Failure {
-        Failure { why, ran: true }
+        Failure {
+            why,
+            fault: Fault::SaidSo,
+        }
     }
 }
 
@@ -169,11 +181,40 @@ fn is_a_tally_of_findings(line: &str) -> bool {
         .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
+/// A path the row names that is not in `dir`, or that leads out of it.
+///
+/// A row's paths are checked by their spelling when the row is read. Here they are
+/// checked against the place itself: a link in the repository can lead anywhere,
+/// and what a command finds there is not the same for every reader.
+fn path_fault(plan: &Plan, dir: &Path) -> Option<String> {
+    // When `dir` itself is not there, starting the program says so.
+    let home = dir.canonicalize().ok()?;
+    for path in &plan.paths {
+        match dir.join(path).canonicalize() {
+            Err(_) => return Some(format!("`{}` is not there", shown(path))),
+            Ok(real) if !real.starts_with(&home) => {
+                return Some(format!(
+                    "`{}` leads out of the ledger's directory",
+                    shown(path)
+                ));
+            }
+            Ok(_) => {}
+        }
+    }
+    None
+}
+
 /// Run a command and count what it shows.
 pub fn run(plan: &Plan, dir: &Path, limit: Duration) -> Outcome {
+    if let Some(why) = path_fault(plan, dir) {
+        return Outcome::Failed {
+            why,
+            fault: Fault::Path,
+        };
+    }
     let ran = match start(&plan.argv, dir, limit) {
         Ok(ran) => ran,
-        Err(Failure { why, ran }) => return Outcome::Failed { why, ran },
+        Err(Failure { why, fault }) => return Outcome::Failed { why, fault },
     };
     let results = match plan.counts {
         // Every line is a result, an empty one too: `rg -x ''` prints empty lines.
@@ -193,7 +234,7 @@ pub fn run(plan: &Plan, dir: &Path, limit: Duration) -> Outcome {
                                 "`{}` printed something other than a list of items",
                                 plan.argv[0]
                             ),
-                            ran: false,
+                            fault: Fault::DidNotRun,
                         };
                     }
                 }

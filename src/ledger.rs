@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use toml::value::{Date, Datetime};
 use toml::{Table, Value};
 
-use crate::text::hidden;
+use crate::text::unseen;
 
 /// The file name `ley` looks for.
 pub const FILE_NAME: &str = "ley.toml";
@@ -199,6 +199,15 @@ pub fn parse(text: &str) -> Result<Vec<Row>, Vec<Problem>> {
     match table.get("row") {
         None => {}
         Some(Value::Array(values)) => {
+            // Written as blocks, each row has a line of its own from the other parser.
+            if !layout.rows.is_empty() && layout.rows.len() != values.len() {
+                problems.push(Problem::new(
+                    layout.opener,
+                    "toml",
+                    "`ley` reads this file twice, and the two readings do not count the same \
+                     number of rows. This is a fault in `ley`",
+                ));
+            }
             for (i, value) in values.iter().enumerate() {
                 let line = layout.rows.get(i).copied().unwrap_or(layout.opener);
                 rows.extend(row(value, line, &mut problems));
@@ -248,7 +257,12 @@ fn layout(text: &str, problems: &mut Vec<Problem>) -> Layout {
         rows: Vec::new(),
         keys: std::collections::BTreeMap::new(),
     };
+    // The values were read by one parser, and the positions come from another.
+    // Both read the same TOML. If they ever disagree, say so: do not guess a line.
+    const DISAGREE: &str = "`ley` reads this file twice, once for values and once for \
+                            positions, and the two readings disagree. This is a fault in `ley`";
     let Ok(document) = toml_edit::Document::parse(text) else {
+        problems.push(Problem::new(1, "toml", DISAGREE));
         return found;
     };
     let line_of = |span: Option<std::ops::Range<usize>>| span.map(|span| line_at(text, span.start));
@@ -551,10 +565,10 @@ fn text(table: &Table, key: &str, line: usize, problems: &mut Vec<Problem>) -> O
         // A new line would let a row forge a second row when it is printed. A control
         // character can rewrite what a terminal shows. A change of direction can make
         // a command read as another command.
-        value.chars().find(|c| hidden(*c)).map(|c| {
+        unseen(value).map(|c| {
             format!(
-                "holds U+{:04X}: text is one line, with no control character and \
-                 no character that hides or reorders what a reader sees",
+                "holds U+{:04X}: text is one line, with no control character, no space \
+                 but the plain one, and no character that a reader cannot see",
                 c as u32
             )
         })
@@ -578,24 +592,45 @@ fn source(value: &Value) -> Result<Source, String> {
     }
     let by = match table.get("by") {
         Some(Value::String(by))
-            if !by.trim().is_empty() && by.trim() == by && !by.chars().any(hidden) =>
+            if !by.trim().is_empty() && by.trim() == by && unseen(by).is_none() =>
         {
             by.clone()
         }
         Some(Value::String(_)) => {
             return Err(
                 "`by` is a name on one line, with no space at either end, no control character \
-                 and no character that hides or reorders what a reader sees"
+                 and no character that a reader cannot see"
                     .into(),
             );
         }
         _ => return Err(FORM.into()),
     };
+    // "by an agent on 2026-11-10, by someone else" would print as two sources.
+    if let Some(found) = a_date_in(&by) {
+        return Err(format!(
+            "`by` holds a date, {found}: `by` names who said it, and the date goes in `on`"
+        ));
+    }
     let on = match table.get("on") {
         Some(Value::Datetime(when)) => date(when).ok_or(FORM)?,
         _ => return Err(FORM.into()),
     };
     Ok(Source { by, on })
+}
+
+/// Text in the form of a date, 2026-11-10, anywhere in `text`.
+fn a_date_in(text: &str) -> Option<&str> {
+    const FORM: &[u8] = b"dddd-dd-dd";
+    let bytes = text.as_bytes();
+    (0..bytes.len().saturating_sub(FORM.len() - 1)).find_map(|at| {
+        let window = &bytes[at..at + FORM.len()];
+        let fits = window.iter().zip(FORM).all(|(byte, form)| match form {
+            b'd' => byte.is_ascii_digit(),
+            _ => byte == form,
+        });
+        // The window is all ASCII, so it starts and ends between characters.
+        fits.then(|| &text[at..at + FORM.len()])
+    })
 }
 
 /// A TOML date with no time and no offset.
@@ -609,12 +644,97 @@ fn date(when: &Datetime) -> Option<Date> {
 /// File endings that mark a word as a file, so that `stage.ts:12` is a position
 /// and `billing.internal:8443` or the image tag `billing/api:2` is not. The list
 /// cannot be complete. A missed ending lets a position through; it never refuses
-/// honest text.
-const FILE_ENDINGS: [&str; 46] = [
-    "c", "cc", "cfg", "cjs", "conf", "cpp", "cs", "css", "cts", "dart", "go", "h", "hpp", "html",
-    "ini", "java", "js", "json", "jsx", "kt", "lock", "lua", "md", "mjs", "mts", "php", "proto",
-    "py", "rb", "rs", "scala", "sh", "sql", "svelte", "swift", "tf", "toml", "ts", "tsx", "txt",
-    "vue", "xml", "yaml", "yml", "zig", "zsh",
+/// honest text. For the same reason it leaves out endings that are also the last
+/// part of many host names, such as `pl` and `ml`.
+const FILE_ENDINGS: &[&str] = &[
+    "adoc",
+    "bat",
+    "c",
+    "cc",
+    "cfg",
+    "cjs",
+    "clj",
+    "cmake",
+    "conf",
+    "cpp",
+    "cs",
+    "css",
+    "csv",
+    "cts",
+    "cxx",
+    "dart",
+    "el",
+    "erl",
+    "ex",
+    "exs",
+    "go",
+    "gradle",
+    "graphql",
+    "groovy",
+    "h",
+    "hh",
+    "hpp",
+    "hs",
+    "html",
+    "hxx",
+    "ini",
+    "java",
+    "jl",
+    "js",
+    "json",
+    "jsx",
+    "kt",
+    "kts",
+    "lock",
+    "lua",
+    "md",
+    "mjs",
+    "mts",
+    "nix",
+    "php",
+    "properties",
+    "proto",
+    "ps1",
+    "py",
+    "rb",
+    "rs",
+    "rst",
+    "sbt",
+    "scala",
+    "scss",
+    "sh",
+    "sql",
+    "svelte",
+    "swift",
+    "tex",
+    "tf",
+    "toml",
+    "ts",
+    "tsv",
+    "tsx",
+    "txt",
+    "vim",
+    "vue",
+    "xml",
+    "yaml",
+    "yml",
+    "zig",
+    "zsh",
+];
+
+/// Files that are known by their whole name, in small letters.
+const FILE_NAMES: &[&str] = &[
+    "brewfile",
+    "caddyfile",
+    "containerfile",
+    "dockerfile",
+    "gemfile",
+    "jenkinsfile",
+    "justfile",
+    "makefile",
+    "procfile",
+    "rakefile",
+    "vagrantfile",
 ];
 
 /// Find text that records where a match was: `src/a.rs:12`, or `on line 12`.
@@ -642,7 +762,9 @@ fn stored_output(text: &str) -> Option<String> {
             let ending = file
                 .rsplit_once('.')
                 .map(|(_, end)| end.to_ascii_lowercase());
-            let is_a_file = ending.is_some_and(|end| FILE_ENDINGS.contains(&end.as_str()));
+            let name = file.rsplit(['/', '\\']).next().unwrap_or(file);
+            let is_a_file = ending.is_some_and(|end| FILE_ENDINGS.contains(&end.as_str()))
+                || FILE_NAMES.contains(&name.to_ascii_lowercase().as_str());
             if is_a_file && starts_with_digit(rest) {
                 return Some((*word).to_string());
             }
@@ -831,12 +953,18 @@ mod tests {
                 "the interface declared on line 3 of stage.ts",
                 Some("line 3"),
             ),
+            ("the target defined at Makefile:12", Some("Makefile:12")),
+            ("built by docker/Dockerfile:3", Some("docker/Dockerfile:3")),
+            ("the clause at lib/app.ex:40", Some("lib/app.ex:40")),
+            ("the type in Main.hs:7", Some("Main.hs:7")),
             ("line 12 of the glossary", Some("line 12")),
             // Not positions:
             ("the run at 10:30 each night", None),
             ("the page at https://example.org:8080/x", None),
             ("the proxy that listens on billing.internal:8443", None),
             ("the image published as billing/api:2", None),
+            // A host name that ends the way a kind of file does is still a host.
+            ("the mirror at example.pl:8080", None),
             ("the host 10.0.0.5:443", None),
             ("the ratio v1.2:3", None),
             ("the line each stage is declared on", None),
@@ -1044,6 +1172,30 @@ mod tests {
         // A joiner that a script needs is let through.
         let text = "[[row]]\nname = \"a\"\nis = \"می\\u200Cخواهم\"\nsaid = [{ by = \"m\", on = 2026-11-10 }]\n";
         assert!(parse(text).is_ok());
+    }
+
+    #[test]
+    fn a_source_s_name_holds_no_date() {
+        let text = "[[row]]\nname = \"a\"\nis = \"b\"\nsaid = [{ by = \"an agent on 2026-11-10, by Someone Else\", on = 2026-11-11 }]\n";
+        let problems = parse(text).unwrap_err();
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0].rule, "source");
+        assert!(
+            problems[0]
+                .message
+                .contains("`by` holds a date, 2026-11-10")
+        );
+        assert_eq!(a_date_in("minutes of 2026-11-03"), Some("2026-11-03"));
+        // A version, a year, and a name in another script are not dates.
+        for name in [
+            "Claude Fable 5.2",
+            "the 2026 review",
+            "Zoë 2026-11",
+            "山田 太郎",
+            "",
+        ] {
+            assert_eq!(a_date_in(name), None, "{name}");
+        }
     }
 
     #[test]
