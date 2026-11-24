@@ -251,7 +251,7 @@ It does not yet deliver rows into an agent's session, choose which rows a reader
 cargo install --locked --path .
 ```
 
-This needs Rust 1.85 or later, and installs one program, `ley`.
+This needs Rust 1.85 or later, and installs one program, `ley`. It is not on crates.io yet.
 
 `ley check` and `ley since` start the programs that the rows name. So they need [ripgrep](https://github.com/BurntSushi/ripgrep) and [ast-grep](https://ast-grep.github.io). A row that uses `ast-grep outline` needs ast-grep 0.44 or later; with an older one, the row is reported as "could not run". The tests here ran with ripgrep 14.1 and ast-grep 0.51.
 
