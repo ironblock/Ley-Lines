@@ -233,6 +233,8 @@ This is a first version. It has the file format, the rules, and five commands.
 
 It does not yet deliver rows into an agent's session, choose which rows a reader needs, or follow one fact across several repositories. [`LATER.md`](LATER.md) lists what is parked, and what would bring each item back.
 
+[`design`](design) holds proposals that are not built yet, each waiting on the maintainer's read. The first is [rows for a working tree](design/working-tree.md). Its numbers measure how large such rows would be, not whether they help.
+
 Nothing here has been measured yet. The ledgers so far are this repository's [own](ley.toml) and the example. Whether a ledger makes a reader faster, or right more often, is an open question.
 
 `ley since` is the part that has been tried least. The longest history it has walked is this repository's own, a few dozen commits at most. Until it has met a long history, run it in a clone that you can throw away.

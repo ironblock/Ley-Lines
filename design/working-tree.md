@@ -1,6 +1,6 @@
 # Rows for a working tree
 
-Written by Claude Opus 5.5 on 2026-11-24. A proposal for the maintainer to read before any of it is built. Nothing here exists yet but the measurements, and `sizes.py`, which made them.
+Written by Claude Opus 5.5 on 2026-11-24. A proposal for the maintainer to read before any of it is built. Nothing here exists yet but measurements of how large the rows would be, and `sizes.py`, which made them. Whether rows like these help a reader is not measured here.
 
 ## What is asked
 
@@ -16,7 +16,7 @@ This is "run this to see that" for code being written now, where the rest of Ley
 
 ## The proposal in one paragraph
 
-`ley mark` saves the working tree as it is now, as a git tree, through an index of its own. `ley changes` compares a mark with the working tree and prints one row for each file and each declaration that was added, changed or is gone. Each row says what kind of thing changed, and gives a command that shows the thing as it is now. How much of each thing `ley changes` prints under its row, its name, its first line or its lines, is what Kung Fu's patch run is measuring now; the table below says which result picks which. A test row names the test files that name a changed declaration. Whether they passed is recorded from a test run, with the tree it ran on. `ley` never runs a test.
+`ley mark` saves the working tree as it is now, as a git tree, through an index of its own. `ley changes` compares a mark with the working tree and prints one row for each file and each declaration that was added, changed or is gone. Each row says what kind of thing changed, and gives a command that shows the thing as it is now. How much of each thing `ley changes` prints under its row, its name, its first line or its lines, is what Kung Fu's patch run will measure, once its tries are sent. The table below says which of its answers picks which. A test row names the test files that name a changed declaration. Whether they passed is recorded from a test run, with the tree it ran on. `ley` never runs a test.
 
 ## The mark
 
@@ -25,7 +25,7 @@ A mark is the earlier state.
 - **What it is.** `git add -A` into an index of `ley`'s own, then `git write-tree`. The result is a tree: every file git would track, as it is in the working tree, and nothing it ignores.
 - **What it needs.** A git repository. It needs no commit. It works in a repository whose history is empty, cut short or squashed. That was tried: a copy of a 5,714-file tree in a new repository with no commits.
 - **What it leaves alone.** Your index, your HEAD, your branches and your files. It adds objects to the repository's object store, as `git add` would. `ley since` already works this way, through an index of its own.
-- **How it is kept.** By a ref, `refs/ley/marks/<n>`, so that git's garbage collection keeps its objects. Question 1 below asks whether that is the place.
+- **How it is kept.** By a ref, `refs/ley/marks/<n>`, so that git's garbage collection keeps its objects. Question A below asks whether that is the place.
 - **What it costs.** The first mark hashes every file. Later ones reuse the index and hash only what changed.
 
 | Tree | Files | First mark | A later mark, one file changed | What changed between the two marks |
@@ -50,33 +50,33 @@ services/quillon/stage.ts changed: 1 line added.
   it will show you its first line and the first line of each of its members: 1 result.
 ```
 
-The sentence is `ley`'s, as with `ley show`. The command is one `ley check` would run today. A declaration that is gone gets the same command with "it will show you that it is no longer there: 0 results".
+The sentence is `ley`'s, as with `ley show`. The command is one `ley check` would run today. A declaration that is gone gets the same command, and its row ends "it will show you the interface Stage: 0 results", as a row with `count = 0` does today.
 
-**How much is printed under a row.** At the level of names, nothing: the reader runs the command if it wants to. At the level of first lines, `ley` runs the command and prints what it shows. At the level of lines, `ley` prints the declaration's lines from the file, with their numbers. The numbers and the lines are read at the moment of printing. Nothing that was printed is stored.
+**How much is printed under a row.** At the level of names, nothing: the reader runs the command if it wants to. At the level of first lines, `ley` runs the command and prints what it shows. At the level of lines, `ley` prints the declaration's lines from the file, with their numbers. The numbers and the lines are read at the moment of printing. Nothing that was printed is stored. `sizes.py` calls these three levels `names`, `shape` and `region`.
 
 **Order and size.** Files in the order of their paths, and declarations in the order of the file. A budget in tokens, `--budget`, caps what is printed under the rows. Past it, rows are printed with names only, and past that `ley` says how many rows it did not print. It never drops a row in silence.
 
 ## How much a row carries: what the patch run decides
 
-Kung Fu's patch run asks how much of a file a reader must hold to patch it right. Its arms hold a file's path, its outline, its outline and the lines of the declarations named, or the whole file. Its five questions are in that run's note. The rows should hold no more than its answer says is needed, and no less. So the choice is written down here, before its tries come back:
+Kung Fu's patch run asks how much of a file a reader must be given to patch it right. Its note is [`bench/runs/2026-11-20-patch/README.md`](https://github.com/ironblock/Kung-Fu/blob/claude/gracious-gates-1xlptv/bench/runs/2026-11-20-patch/README.md) in Kung Fu, and its five questions are there. Its arms hand the reader the file's path (`name`), its outline (`outline`), its outline and the lines of each declaration the ask names (`region`), or the whole file (`whole`). Rows should carry no more than its answer says is needed, and no less. So the choice is written down here, before its tries come back:
 
 | If the patch run finds | Then a row for a changed file carries |
 | --- | --- |
-| An outline is as good as the whole file for adding code (question 2) | the file's outline, so that code can be added beside what is there |
+| An outline is as good as the whole file for adding code (patch question 2) | the file's outline, so that code can be added beside what is there |
 | The outline is not as good as the whole file for adding code | the outline, and a pointer to the whole file, which the reader opens if it has tools |
-| The named part is as good as the whole file for changing a declaration (question 3) | for each changed declaration, its lines |
-| The named part is not as good as the whole file for changing a declaration | the whole file |
-| The named part falls short when a change leans on another body (question 4) | also, for each changed declaration, the names it calls, each with the command that shows it |
-| The named part does better than the outline alone (question 5) | lines, and not first lines alone, for each changed declaration |
+| `region` is as good as the whole file for changing a declaration (patch question 3) | for each changed declaration, its lines |
+| `region` is not as good as the whole file for changing a declaration | the whole file |
+| `region` falls short when a change leans on another body (patch question 4) | also, for each changed declaration, the names it calls, each with the command that shows it |
+| `region` does better than the outline alone (patch question 5) | lines, and not first lines alone, for each changed declaration |
 | The rule cannot tell | the larger of the two, until a run can |
 
 The patch run's outline is the whole file's outline. A row at the level of first lines holds only the changed declarations' first lines, which is less. That is why the table speaks of the file's outline.
 
-A hint, not a result: the patch run's ceiling, a stronger model with one try a task, passed every task with the whole file. With the outline it passed every task that adds code. With the named part it passed every task that changes one declaration, and 4 of 16 that lean on another body.
+A hint, not a result: the patch run's ceiling, a stronger model with one try a task, passed every task with the whole file. With the outline it passed every task that adds code. With `region` it passed every task that changes one declaration, and 4 of 16 that lean on another body.
 
 ## Tests
 
-**Which tests cover a change.** For each added or changed declaration, a row runs `rg -l -w -F <name>` over the places that hold tests. It shows the test files that name it. This is a command `ley check` runs today. Its limits: a name shorter than four characters is left out, as in rule 1, because it is in too many files; and a test that reaches the code under another name is missed. The places that hold tests would be named once, in `ley.toml` (question 2).
+**Which tests cover a change.** For each added or changed declaration, a row runs `rg -l -w -F <name>` over the places that hold tests. It shows the test files that name it. This is a command `ley check` runs today. Its limits: a name shorter than four characters is left out, as in rule 1, because it is in too many files; and a test that reaches the code under another name is missed. The places that hold tests would be named once, in `ley.toml` (question B).
 
 **Whether they passed.** `ley` does not run tests. A test runs the repository's code. `ley` runs only commands that fit a shape, and that is what makes running `ley check` no more trusting than running `rg` yourself. So whoever runs the tests records the run:
 
@@ -84,7 +84,7 @@ A hint, not a result: the patch run's ceiling, a stronger model with one try a t
 $ ley tested --exit 0 -- cargo test
 ```
 
-`ley` keeps the command, its exit status, the time, and a mark of the tree at that moment. Then a test row says, for each test file that names a changed declaration, whether a recorded run passed, at which mark, and whether that file or what it names has changed since. A recorded run is a source, with a date, as rule 3 asks. `LATER.md` parks "commands that pass or fail"; this brings it back in a narrow form, since `ley` records the result and does not run the command.
+`ley` keeps the command, its exit status, the time, and a mark of the tree at that moment. Then a test row says, for each test file that names a changed declaration, whether a recorded run passed, at which mark, and whether that file or what it names has changed since. A recorded run is a source, with a date, as rule 3 asks. `LATER.md` parks "commands that pass or fail"; this brings it back in a narrow form, since `ley` records the result and does not run the command. Kung Fu has tried the other form. In its run `bench/runs/2026-11-19-notes-at-pins`, 67 notes on a library each carry a test that passes or fails, and `bench/notes.py check` sorts them into `ley check`'s own states, holds, differs and could not run, at seven commits of the library.
 
 ## The rules, one by one
 
@@ -93,7 +93,7 @@ $ ley tested --exit 0 -- cargo test
 3. **a command or a source.** Kept. That a thing changed is found by `ley` from two trees, and the row names the mark and its time. A test result names the recorded run.
 4. **no grades.** Kept. `ley` does not judge which change matters. It orders by path. The budget drops rows by place, not by worth, and says how many it dropped.
 5. **no instructions.** Kept. `ley` writes every sentence.
-6. **one field per line.** It applies if the rows are written as TOML (question 6).
+6. **one field per line.** It applies if the rows are written as TOML (question F).
 7. **the same for every reader.** Not kept, and it cannot be: a working tree belongs to one clone. So these rows never go into `ley.toml`. They are printed for the session that asked, and the marks live in the clone, not in history.
 8. **exact name, wide search.** Kept for test rows: the declaration's exact name, searched as a word over every place that holds tests.
 9. **fail loud.** Kept. A mark that is missing, a file that is not text, a file the outline reports nothing for, and every row the budget leaves out are each said.
@@ -103,12 +103,14 @@ $ ley tested --exit 0 -- cargo test
 
 Four changes in real trees, measured by `sizes.py` from two exported commits each. Tokens are bytes divided by 3.5, an estimate.
 
-| Change | Files changed | Declarations | Names | + first lines | + lines | Whole files | Time |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Ley Lines, pull request 2 | 9 | 13 | 106 | 397 | 5,938 | 52,727 | 1.9 s |
-| Kung Fu, one commit of bench tools | 7 | 38 | 91 | 803 | 12,025 | 47,916 | 1.8 s |
-| Babylon Lite, one commit | 92 | 491 | 1,946 | 18,795 | 128,554 | 502,007 | 4.9 s |
-| Babylon Lite, 17 commits | 624 | 2,020 | 12,865 | 82,399 | 470,557 | 2,194,266 | 34 s |
+| Change | Files changed | Declarations | Names | + first lines | + lines | A plain diff | Whole files | Time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Ley Lines, pull request 2 | 9 | 13 | 106 | 397 | 5,938 | 5,235 | 52,727 | 1.9 s |
+| Kung Fu, one commit of bench tools | 7 | 38 | 91 | 803 | 12,025 | 11,216 | 47,916 | 1.8 s |
+| Babylon Lite, one commit | 92 | 491 | 1,946 | 18,795 | 128,554 | 181,261 | 502,007 | 4.9 s |
+| Babylon Lite, 17 commits | 624 | 2,020 | 12,865 | 82,399 | 470,557 | 943,096 | 2,194,266 | 34 s |
+
+A plain diff is the names and the changed lines with three lines round each, as `diff -u` gives them. For a change the size of one commit it is a little smaller than the lines of each changed declaration; for the large changes it is larger. A row adds what a diff does not: the name of each declaration, and a command that shows it as it is now.
 
 The test rows, the test files that name each changed declaration, came to 201 tokens for the Ley Lines change and 24,578 for the one Babylon Lite commit.
 
@@ -126,21 +128,22 @@ The test rows, the test files that name each changed declaration, came to 201 to
 
 ## Questions for the maintainer
 
-1. **Where a mark lives.** A ref under `refs/ley/marks/` keeps its objects from garbage collection, and `git push --mirror` would send it. A file under `.git/ley/` sends nothing, but git may prune its objects after two weeks.
-2. **Tests.** Recorded by `ley tested`, as above, or run by `ley` from a command the ledger names? And are the places that hold tests named in `ley.toml`?
-3. **Which earlier state.** The first mark of a session, so that the rows hold everything the session changed, or the last, so that they hold only what changed since the last clearing? I would print the first by default, and the last with `--since-last`.
-4. **The budget.** Its default, and what goes first when it binds: changed before added, or the smallest first.
-5. **A tree that is not a git repository.** Refuse, or keep a store of `ley`'s own?
-6. **The form.** Sentences, as `ley show` prints, or rows as TOML, or both.
+A. **Where a mark lives.** A ref under `refs/ley/marks/` keeps its objects from garbage collection, and `git push --mirror` would send it. A file under `.git/ley/` sends nothing, but git may prune its objects after two weeks.
+B. **Tests.** Recorded by `ley tested`, as above, or run by `ley` from a command the ledger names? And are the places that hold tests named in `ley.toml`?
+C. **Which earlier state.** The first mark of a session, so that the rows hold everything the session changed, or the last, so that they hold only what changed since the last clearing? I would print the first by default, and the last with `--since-last`.
+D. **The budget.** Its default, and what goes first when it binds: changed before added, or the smallest first.
+E. **A tree that is not a git repository.** Refuse, or keep a store of `ley`'s own?
+F. **The form.** Sentences, as `ley show` prints, or rows as TOML, or both.
 
 ## How to see the numbers
 
-The four changes, each two commits exported and compared:
+The numbers above are what these commands printed on 2026-11-24. Run them in an empty directory outside the repository, with `LEY` set to this repository's path. Each change is two commits, exported and compared:
 
 ```sh
+mkdir before after
 git -C <a clone> archive <before> | tar -x -C before
 git -C <a clone> archive <after> | tar -x -C after
-python3 design/sizes.py before after --show none
+python3 "$LEY/design/sizes.py" before after --show none
 ```
 
 | Change | Repository | Before | After |

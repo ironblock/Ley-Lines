@@ -11,7 +11,7 @@ target/debug/ley show shape      # what one name means, and where it lives
 target/debug/ley rules           # the rules a ledger follows
 ```
 
-`README.md` says what the project is for. `LATER.md` says what is parked, and why.
+`README.md` says what the project is for. `LATER.md` says what is parked, and why. `design/` holds proposals that are not built yet.
 
 ## Before you commit
 
