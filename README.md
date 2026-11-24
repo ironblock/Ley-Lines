@@ -121,7 +121,7 @@ shows = "…"
 | `run` | A command. |
 | `shows` | What kind of thing the command shows, not the thing itself. `ley` prints "If you run *run*, it will show you *shows*." |
 | `count` | How many results the command shows. It is 1 when left out. It may be 0: the command then shows that something is not there. |
-| `since`, `sha` | The earliest known date and commit at which the row held. `ley since` writes them. The date is the commit's day in UTC. |
+| `since`, `sha` | The earliest known date and commit at which the row held. `ley since` writes them. The date is the day of the commit's committer date, in UTC, not of its author date. |
 
 A row has `is`, or `run`, or both. What kind of row it is follows from the keys it carries.
 
@@ -136,7 +136,7 @@ A result is one line for `rg`, one match for `ast-grep run` and `ast-grep scan`,
 | command | what it does |
 |---|---|
 | `ley show` | Lists every name in the ledger. |
-| `ley show <name>` | Prints the rows with that name. A name of several words needs no quotes. Runs nothing. |
+| `ley show <name>` | Prints the rows with that name. If no row has exactly that name, prints each row whose name contains it. Letter case is ignored. A name of several words needs no quotes. Runs nothing. |
 | `ley check` | Runs each row's command and compares what it shows with what the row says. |
 | `ley since` | Walks back through git history and records the earliest commit at which each row held. |
 | `ley shapes` | Lists the commands `ley check` will run. |
@@ -151,16 +151,20 @@ A result is one line for `rg`, one match for `ast-grep run` and `ast-grep scan`,
 | holds | The command showed as many results as the row says. |
 | differs | The command showed a different number. |
 | restates | The command showed the right number, and the row's `shows` repeats part of what it printed. |
-| could not run | The program is missing, or too old, or said it failed. Or a path the row names is not there. |
+| could not run | The program is missing, or too old, or said it failed, or did not finish within 60 seconds. Or a path the row names is not there. |
 | not checked | The command fits no shape, so `ley` did not run it. |
 
-It exits with 0 when every command that ran holds. With `--strict`, a row that was not checked also counts against it. A row with no command has nothing to run, and never fails.
+Each command may run for 60 seconds. Then `ley` stops it, and reports that the program did not finish within 60 seconds.
+
+It exits with 0 when every command that ran holds. It exits with 1 when a row differs, restates or could not run, so a path that is not there gives 1. With `--strict`, a row that was not checked also counts against it. A row with no command has nothing to run, and never fails. When the ledger breaks a rule, `ley check` lists each problem, runs nothing, and exits with 1. When it finds no ledger, or cannot read it, it exits with 2.
 
 `ley since` reads the repository and writes one file, the ledger. It puts each commit's files into a temporary directory, through an index of its own. It registers no working tree and runs none of the repository's hooks. Your files, your index and your HEAD stay as they were. If it is stopped half way, what remains is that temporary directory.
 
 Git checks those files out the way it would for you. So it runs the filters that your git settings name for checking files out. It also fetches what a commit needs and the clone does not have: large files kept by git-lfs, and files that a partial clone left out. Those are the only things a walk adds to the repository.
 
 `ley since` judges commits, and `ley check` judges the files in front of you. A row about a file that is in no commit, such as a file a build writes or a file inside a submodule, can hold for `ley check` and still cannot be dated. `ley since` says that such a row does not hold at the current commit.
+
+`ley since` walks back along first parents only. It does not enter a branch that a merge commit brought in. So a row that first held on such a branch is dated by the merge commit, not by the commit on the branch where it first held.
 
 When a command could not run at an older commit, the walk stops there for that row and says so. That is not a commit at which the row did not hold, so it moves no date.
 
@@ -225,7 +229,7 @@ Running `ley check` in a repository trusts that repository as much as running `r
 
 A fact belongs in a ledger if it is about one particular place and would be false, or mean nothing, anywhere else: what a codename refers to, where an interface is defined, which stages a pipeline has, which line raises an error.
 
-How to use a tool is a different kind of fact. It is true wherever the tool is installed. That is the subject of a sibling project, Kung Fu.
+How to use a tool is a different kind of fact. It is true wherever the tool is installed. That is the subject of a sibling project, [Kung Fu](https://github.com/ironblock/Kung-Fu).
 
 ## Status
 
@@ -233,17 +237,21 @@ This is a first version. It has the file format, the rules, and five commands.
 
 It does not yet deliver rows into an agent's session, choose which rows a reader needs, or follow one fact across several repositories. [`LATER.md`](LATER.md) lists what is parked, and what would bring each item back.
 
-Nothing here has been measured yet. The ledgers so far are this repository's [own](ley.toml) and the example. Whether a ledger makes a reader faster, or right more often, is an open question.
+[`design`](design) holds proposals that are not built yet, each waiting on the maintainer's read. The first is [rows for a working tree](design/working-tree.md). Its numbers measure how large such rows would be, not whether they help.
+
+[Kung Fu](https://github.com/ironblock/Kung-Fu) had six sessions write [ledgers for one directory of a real library](https://github.com/ironblock/Kung-Fu/tree/claude/gracious-gates-1xlptv/bench/runs/2026-11-14-map-camera): `ley check` passed all 204 of their rows, and "46 sentences of 204 hold something the code shows is not so". For [one reader with that library's code in hand](https://github.com/ironblock/Kung-Fu/tree/claude/gracious-gates-1xlptv/bench/runs/2026-11-15-reader), a ledger of that directory, read first, "did not help it pass and did not save reading", and in [a study of one tool](https://github.com/ironblock/Kung-Fu/tree/claude/gracious-gates-1xlptv/bench/studies/fourth.md) "The rows were not shown to save". Whether a ledger makes a reader faster, or right more often, is an open question.
 
 `ley since` is the part that has been tried least. The longest history it has walked is this repository's own, a few dozen commits at most. Until it has met a long history, run it in a clone that you can throw away.
+
+*(Mended 2026-11-24 by Claude Opus 5.5: this file now says what `ley show <name>` prints when no name matches exactly, what `ley check` exits with, how long a command may run, that `ley since` walks first parents only and takes the committer date, and what Kung Fu has measured. `cargo install` now passes `--locked`, as CI builds.)*
 
 ## Building
 
 ```sh
-cargo install --path .
+cargo install --locked --path .
 ```
 
-This needs Rust 1.85 or later, and installs one program, `ley`.
+This needs Rust 1.85 or later, and installs one program, `ley`. It is not on crates.io yet.
 
 `ley check` and `ley since` start the programs that the rows name. So they need [ripgrep](https://github.com/BurntSushi/ripgrep) and [ast-grep](https://ast-grep.github.io). A row that uses `ast-grep outline` needs ast-grep 0.44 or later; with an older one, the row is reported as "could not run". The tests here ran with ripgrep 14.1 and ast-grep 0.51.
 

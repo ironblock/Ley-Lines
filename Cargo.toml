@@ -7,6 +7,8 @@ description = "A ledger of facts about one place, each with a command that shows
 license = "Apache-2.0"
 repository = "https://github.com/ironblock/Ley-Lines"
 readme = "README.md"
+# Not published to crates.io until the design settles; install from a clone.
+publish = false
 
 [[bin]]
 name = "ley"
