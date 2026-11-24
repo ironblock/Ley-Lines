@@ -80,9 +80,10 @@ enum Cmd {
     /// part of what the command printed. A row says what kind of thing its
     /// command shows. It does not say the thing.
     ///
-    /// "could not run": the program is missing, too old, or said it failed. Or
-    /// a path the row names is not there, or a link leads it out of the
-    /// ledger's directory or into `.git`. Then no program is started.
+    /// "could not run": the program is missing, too old, or said it failed, or
+    /// did not finish within 60 seconds and was stopped. Or a path the row
+    /// names is not there, or a link leads it out of the ledger's directory or
+    /// into `.git`. Then no program is started.
     ///
     /// "not checked": the command fits no shape, so `ley` did not run it. See
     /// `ley shapes`.
@@ -92,7 +93,10 @@ enum Cmd {
     /// command's exit status.
     ///
     /// Commands run in the ledger's directory, with no shell. `ley check` exits
-    /// with 0 when every command that ran holds.
+    /// with 0 when every command that ran holds. It exits with 1 when a row
+    /// differs, restates or could not run, so a path that is not there gives 1.
+    /// It exits with 1 too when the ledger breaks a rule, and then runs
+    /// nothing. It exits with 2 when it finds no ledger, or cannot read it.
     Check {
         /// Also fail when a row is not checked
         #[arg(long)]
@@ -103,10 +107,14 @@ enum Cmd {
     },
     /// Record the earliest commit at which each row held
     ///
-    /// Walks back through git history from the current commit, running each
-    /// row's command as it is written now, until the row stops holding. Writes
-    /// the date and commit of the oldest commit at which it held into the
-    /// ledger, as `since` and `sha`. The date is the commit's day in UTC.
+    /// Walks back through git history from the current commit, along first
+    /// parents only, running each row's command as it is written now, until
+    /// the row stops holding. Writes the date and commit of the oldest commit
+    /// at which it held into the ledger, as `since` and `sha`. The date is the
+    /// day of the commit's committer date, in UTC, not of its author date.
+    ///
+    /// The walk does not enter a branch that a merge commit brought in. So a
+    /// row that first held on such a branch is dated by the merge commit.
     ///
     /// Each commit's files are put into a temporary directory. No working tree
     /// is registered, none of the repository's hooks run, and your own files

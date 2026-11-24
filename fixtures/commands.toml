@@ -179,10 +179,11 @@ run = "rg -n \"interface $NAME\" services"
 refused = "a shell expands `$` inside double quotes"
 why = "Single quotes keep the text as written."
 
+# Mended 2026-11-24 by Claude Opus 5.5: the advice below was `-g '*.ts' services`, a glob that includes files, which `ley` refuses.
 [[command]]
 run = "rg -n Stage services/*.ts"
 refused = "a shell interprets `*`"
-why = "The shell would expand this before rg saw it. Use `-g '*.ts' services`."
+why = "The shell would expand this before rg saw it. Use `-t ts services`."
 
 [[command]]
 run = "rg -n Stage services > found.txt"

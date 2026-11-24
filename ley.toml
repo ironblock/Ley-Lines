@@ -152,8 +152,8 @@ sha = "0077862d8869"
 
 [[row]]
 name = "rule"
-is = "something every ledger must follow; `ley` refuses to read a ledger that breaks one"
-said = [{ by = "Claude Fable 5.2", on = 2026-11-10 }]
+is = "something every ledger must follow; `ley` reports a ledger that breaks one it can check"
+said = [{ by = "Claude Opus 5.5", on = 2026-11-24 }]
 
 [[row]]
 name = "rule"
